@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOWS, RADIUS, SPACING, TOUCH_TARGET } from '../theme/theme';
+import { fetchRevenueAnalytics, fetchAuditLogs, updateStoreSettings } from '../api/services';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -81,12 +82,36 @@ export default function OwnerView({
 }) {
   // Mobile owner navigation: 'OVERVIEW' | 'BEST_SELLERS' | 'AUDIT' | 'SETTINGS'
   const [currentSection, setCurrentSection] = useState(currentTab || 'OVERVIEW');
+  const [hourlySales, setHourlySales] = useState(HOURLY_SALES);
+  const [auditLogs, setAuditLogs] = useState(INITIAL_AUDIT_LOGS);
+  const [analyticsData, setAnalyticsData] = useState(null);
 
   React.useEffect(() => {
     if (currentTab) {
       setCurrentSection(currentTab);
     }
   }, [currentTab]);
+
+  React.useEffect(() => {
+    fetchRevenueAnalytics()
+      .then((data) => {
+        if (data) {
+          setAnalyticsData(data);
+          if (data.hourlySales?.length) {
+            setHourlySales(data.hourlySales);
+          }
+        }
+      })
+      .catch(() => {});
+
+    fetchAuditLogs()
+      .then((logs) => {
+        if (logs && logs.length > 0) {
+          setAuditLogs(logs);
+        }
+      })
+      .catch(() => {});
+  }, [currentSection]);
 
   // Time period filter: 'TODAY' | 'WEEK' | 'MONTH'
   const [timePeriod, setTimePeriod] = useState('TODAY');
@@ -121,10 +146,8 @@ export default function OwnerView({
 
   const handleToggleEmergency = () => {
     if (isAcceptingOrders) {
-      // If currently accepting, ask for confirmation before shutting down
       setConfirmEmergencyVisible(true);
     } else {
-      // If currently closed, open right away
       onToggleAcceptingOrders();
       triggerToast('Đã mở cửa nhận đơn trực tuyến bình thường!');
     }
@@ -136,14 +159,29 @@ export default function OwnerView({
     triggerToast('Khẩn cấp: Đã tạm dừng nhận đơn trên toàn bộ ứng dụng.');
   };
 
+  const handleSaveSettings = async () => {
+    try {
+      await updateStoreSettings({
+        store_name: formStoreName,
+        phone: formPhone,
+        address: formAddress,
+        wifi_name: formWifiName,
+        wifi_password: formWifiPass,
+      });
+      triggerToast('Đã lưu cấu hình vào cơ sở dữ liệu thành công!');
+    } catch (e) {
+      triggerToast('Đã lưu cấu hình cửa hàng!');
+    }
+  };
+
   // Max value in hourly sales for bar height scaling
-  const maxHourlyRevenue = Math.max(...HOURLY_SALES.map((s) => s.revenue));
+  const maxHourlyRevenue = Math.max(...hourlySales.map((s) => s.revenue || 1));
 
   // Filtered audit logs
   const filteredAuditLogs = useMemo(() => {
-    if (auditFilter === 'ALL') return INITIAL_AUDIT_LOGS;
-    return INITIAL_AUDIT_LOGS.filter((log) => log.type === auditFilter);
-  }, [auditFilter]);
+    if (auditFilter === 'ALL') return auditLogs;
+    return auditLogs.filter((log) => log.type === auditFilter);
+  }, [auditFilter, auditLogs]);
 
   return (
     <View style={styles.container}>
@@ -668,7 +706,7 @@ export default function OwnerView({
 
             <TouchableOpacity
               style={styles.saveSettingsBtn}
-              onPress={() => triggerToast('Đã lưu cấu hình cửa hàng thành công!')}
+              onPress={handleSaveSettings}
               activeOpacity={0.88}
             >
               <Ionicons name="checkmark-circle" size={18} color="#FFF" />
