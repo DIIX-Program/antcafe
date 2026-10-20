@@ -12,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOWS, RADIUS } from '../theme/theme';
 import { ADDRESSES } from '../data/mockData';
+import { fetchCustomerAddresses, addCustomerAddress } from '../api/services';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -28,19 +29,40 @@ export default function AddressModal({
   const [newPhone, setNewPhone] = useState('');
   const [newDetail, setNewDetail] = useState('');
 
-  const handleAddNewAddress = () => {
+  React.useEffect(() => {
+    if (visible) {
+      fetchCustomerAddresses()
+        .then((data) => {
+          if (data && data.length > 0) {
+            setAddressList(data);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [visible]);
+
+  const handleAddNewAddress = async () => {
     if (!newDetail.trim()) return;
     const item = {
-      id: Date.now(),
       label: newLabel,
       recipient_name: newName || 'Khách hàng',
       phone: newPhone || '0901 234 567',
       address_detail: newDetail.trim(),
       is_default: false,
     };
-    const updated = [item, ...addressList];
-    setAddressList(updated);
-    onSelectAddress(item);
+
+    try {
+      const created = await addCustomerAddress(item);
+      const savedItem = created || { ...item, id: Date.now() };
+      const updated = [savedItem, ...addressList];
+      setAddressList(updated);
+      onSelectAddress(savedItem);
+    } catch (e) {
+      const fallbackItem = { ...item, id: Date.now() };
+      setAddressList([fallbackItem, ...addressList]);
+      onSelectAddress(fallbackItem);
+    }
+
     setShowAddForm(false);
     setNewDetail('');
     setNewName('');

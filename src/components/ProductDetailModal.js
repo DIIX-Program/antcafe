@@ -13,31 +13,34 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS, SHADOWS, RADIUS, TYPOGRAPHY, TOUCH_TARGET } from '../theme/theme';
-import { OPTION_GROUPS } from '../data/mockData';
+import { OPTION_GROUPS as DEFAULT_OPTION_GROUPS } from '../data/mockData';
+import { fetchOptionGroups } from '../api/services';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-/**
- * ProductDetailModal
- * Inspired by Talabat iOS & Mobbin reference (talabat iOS 71.png)
- * Features:
- * - Floating close & favorite action buttons
- * - "Try these quick choices" preset cards with fire icon (e.g. 3k+ orders)
- * - Required / Optional badge chips
- * - Full size, ice, sugar, and toppings customization
- * - Quantity stepper with responsive sticky bottom action bar
- * - Clean mount/unmount lifecycle with zero React 19 static flag reconciler mismatches
- */
-
 function ProductDetailModalContent({ product, onClose, onAddToCart }) {
-  const [selectedSize, setSelectedSize] = useState(OPTION_GROUPS.sizes[0]);
-  const [selectedIce, setSelectedIce] = useState(OPTION_GROUPS.iceLevels[0]);
-  const [selectedSugar, setSelectedSugar] = useState(OPTION_GROUPS.sugarLevels[0]);
+  const [optionGroups, setOptionGroups] = useState(DEFAULT_OPTION_GROUPS);
+  const [selectedSize, setSelectedSize] = useState(DEFAULT_OPTION_GROUPS.sizes[0]);
+  const [selectedIce, setSelectedIce] = useState(DEFAULT_OPTION_GROUPS.iceLevels[0]);
+  const [selectedSugar, setSelectedSugar] = useState(DEFAULT_OPTION_GROUPS.sugarLevels[0]);
   const [selectedToppings, setSelectedToppings] = useState([]);
   const [note, setNote] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [isFavorite, setIsFavorite] = useState(false);
   const [activeQuickChoice, setActiveQuickChoice] = useState(null);
+
+  useEffect(() => {
+    fetchOptionGroups()
+      .then((data) => {
+        if (data && data.sizes?.length) {
+          setOptionGroups(data);
+          if (data.sizes?.[0]) setSelectedSize(data.sizes[0]);
+          if (data.iceLevels?.[0]) setSelectedIce(data.iceLevels[0]);
+          if (data.sugarLevels?.[0]) setSelectedSugar(data.sugarLevels[0]);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const handleApplyQuickChoice = (type) => {
     if (activeQuickChoice === type) {
@@ -48,16 +51,16 @@ function ProductDetailModalContent({ product, onClose, onAddToCart }) {
     setActiveQuickChoice(type);
     if (type === 'TRADITIONAL') {
       // Size M, 70% Đá, 70% Đường, Không topping
-      setSelectedSize(OPTION_GROUPS.sizes[1] || OPTION_GROUPS.sizes[0]);
-      setSelectedIce(OPTION_GROUPS.iceLevels[1] || OPTION_GROUPS.iceLevels[0]);
-      setSelectedSugar(OPTION_GROUPS.sugarLevels[1] || OPTION_GROUPS.sugarLevels[0]);
+      setSelectedSize(optionGroups.sizes[1] || optionGroups.sizes[0]);
+      setSelectedIce(optionGroups.iceLevels[1] || optionGroups.iceLevels[0]);
+      setSelectedSugar(optionGroups.sugarLevels[1] || optionGroups.sugarLevels[0]);
       setSelectedToppings([]);
     } else if (type === 'REFRESHING') {
       // Size L, 100% Đá, 50% Đường, Thạch cà phê
-      setSelectedSize(OPTION_GROUPS.sizes[2] || OPTION_GROUPS.sizes[0]);
-      setSelectedIce(OPTION_GROUPS.iceLevels[0]);
-      setSelectedSugar(OPTION_GROUPS.sugarLevels[2] || OPTION_GROUPS.sugarLevels[0]);
-      const coffeeJelly = OPTION_GROUPS.toppings.find(
+      setSelectedSize(optionGroups.sizes[2] || optionGroups.sizes[0]);
+      setSelectedIce(optionGroups.iceLevels[0]);
+      setSelectedSugar(optionGroups.sugarLevels[2] || optionGroups.sugarLevels[0]);
+      const coffeeJelly = optionGroups.toppings.find(
         (t) => t.id === 'top_4' || t.name.toLowerCase().includes('thạch cà phê')
       );
       setSelectedToppings(coffeeJelly ? [coffeeJelly] : []);
@@ -237,7 +240,7 @@ function ProductDetailModalContent({ product, onClose, onAddToCart }) {
                 </View>
               </View>
 
-              {OPTION_GROUPS.sizes.map((size) => {
+              {optionGroups.sizes.map((size) => {
                 const isSelected = selectedSize.id === size.id;
                 return (
                   <TouchableOpacity
@@ -278,7 +281,7 @@ function ProductDetailModalContent({ product, onClose, onAddToCart }) {
                 </View>
               </View>
               <View style={styles.pillContainer}>
-                {OPTION_GROUPS.iceLevels.map((ice) => {
+                {optionGroups.iceLevels.map((ice) => {
                   const isSelected = selectedIce.id === ice.id;
                   return (
                     <TouchableOpacity
@@ -310,7 +313,7 @@ function ProductDetailModalContent({ product, onClose, onAddToCart }) {
                 </View>
               </View>
               <View style={styles.pillContainer}>
-                {OPTION_GROUPS.sugarLevels.map((sugar) => {
+                {optionGroups.sugarLevels.map((sugar) => {
                   const isSelected = selectedSugar.id === sugar.id;
                   return (
                     <TouchableOpacity
@@ -340,7 +343,7 @@ function ProductDetailModalContent({ product, onClose, onAddToCart }) {
                 <Text style={styles.optionalText}>Chọn nhiều</Text>
               </View>
 
-              {OPTION_GROUPS.toppings.map((top) => {
+              {optionGroups.toppings.map((top) => {
                 const isSelected = selectedToppings.some((t) => t.id === top.id);
                 return (
                   <TouchableOpacity

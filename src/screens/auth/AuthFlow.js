@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOWS, RADIUS, TYPOGRAPHY, TOUCH_TARGET } from '../../theme/theme';
+import { loginUser, registerCustomer } from '../../api/services';
 
 export default function AuthFlow({
   onAuthSuccess,
@@ -55,7 +56,7 @@ export default function AuthFlow({
     setScreen('VERIFY_OTP');
   };
 
-  const handleLoginSubmit = () => {
+  const handleLoginSubmit = async () => {
     setErrorText('');
     if (!phoneOrEmail.trim()) {
       setErrorText('Vui lòng nhập số điện thoại hoặc email');
@@ -67,25 +68,19 @@ export default function AuthFlow({
     }
 
     setIsLoading(true);
-    setTimeout(() => {
+    try {
+      const res = await loginUser(phoneOrEmail.trim(), password);
       setIsLoading(false);
-      // Auto-detect role or default to customer
-      const isOwnerAccount = phoneOrEmail.includes('admin') || phoneOrEmail.includes('owner');
-      const isStaffAccount = phoneOrEmail.includes('barista') || phoneOrEmail.includes('staff');
-
-      const role = isOwnerAccount ? 'OWNER' : isStaffAccount ? 'STAFF' : 'CUSTOMER';
-      const user = {
-        name: isOwnerAccount
-          ? 'Nguyễn Thế Hùng (Chủ quán)'
-          : isStaffAccount
-          ? 'Minh Tuấn (Barista Ca sáng)'
-          : 'Nguyễn Văn A',
-        identifier: phoneOrEmail,
-        role,
-      };
-
-      onAuthSuccess({ role, user });
-    }, 450);
+      if (res.data?.user) {
+        onAuthSuccess({
+          role: res.data.role,
+          user: res.data.user,
+        });
+      }
+    } catch (err) {
+      setIsLoading(false);
+      setErrorText(err.message || 'Số điện thoại hoặc mật khẩu không chính xác');
+    }
   };
 
   const handleRegisterSubmit = () => {
@@ -137,20 +132,29 @@ export default function AuthFlow({
     }, 350);
   };
 
-  const handleCompleteProfile = () => {
+  const handleCompleteProfile = async () => {
     setIsLoading(true);
-    setTimeout(() => {
+    try {
+      const res = await registerCustomer({
+        phone: phoneOrEmail.trim(),
+        password: password,
+        full_name: fullName.trim(),
+        email: phoneOrEmail.includes('@') ? phoneOrEmail.trim() : null,
+      });
       setIsLoading(false);
       onAuthSuccess({
         role: 'CUSTOMER',
-        user: {
+        user: res.data?.user || {
           name: fullName || 'Khách hàng thân thiết',
           phone: phoneOrEmail,
           favoriteCoffee,
           role: 'CUSTOMER',
         },
       });
-    }, 400);
+    } catch (err) {
+      setIsLoading(false);
+      setErrorText(err.message || 'Lỗi khi hoàn tất đăng ký');
+    }
   };
 
   return (

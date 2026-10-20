@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -18,12 +18,32 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS, SHADOWS, RADIUS, TYPOGRAPHY, TOUCH_TARGET } from './src/theme/theme';
 import {
   STORE_SETTINGS,
-  CATEGORIES,
+  CATEGORIES as INITIAL_CATEGORIES,
   PRODUCTS as INITIAL_PRODUCTS,
   ADDRESSES,
   INITIAL_ORDERS,
   VOUCHERS,
 } from './src/data/mockData';
+
+import {
+  fetchStoreStatus,
+  toggleStoreAcceptingOrders,
+  fetchCategories,
+  fetchProducts,
+  fetchAllOrders,
+  checkoutOrder,
+  updateOrderStatus as apiUpdateOrderStatus,
+  toggleProductAvailability as apiToggleAvailability,
+  fetchCustomerAddresses,
+} from './src/api/services';
+
+import {
+  initSocketClient,
+  subscribeOrderCreated,
+  subscribeOrderStatusUpdated,
+  subscribeStoreStatusUpdated,
+  subscribeProductAvailabilityUpdated,
+} from './src/services/socket';
 
 import Header from './src/components/Header';
 import ProductCard from './src/components/ProductCard';
@@ -37,6 +57,7 @@ import StaffView from './src/components/StaffView';
 import OwnerView from './src/components/OwnerView';
 import FloatingBottomNav from './src/components/FloatingBottomNav';
 import SearchModal from './src/components/SearchModal';
+import AccountModal from './src/components/AccountModal';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -46,13 +67,12 @@ export default function App() {
   const [isAcceptingOrders, setIsAcceptingOrders] = useState(
     STORE_SETTINGS.is_accepting_orders
   );
+  const [storeSettings, setStoreSettings] = useState(STORE_SETTINGS);
+  const [categories, setCategories] = useState(INITIAL_CATEGORIES);
   const [products, setProducts] = useState(INITIAL_PRODUCTS);
   const [orders, setOrders] = useState(INITIAL_ORDERS);
-  const [currentUser, setCurrentUser] = useState({
-    name: 'Nguyễn Văn A',
-    phone: '0901 234 567',
-    role: 'CUSTOMER',
-  });
+  const [currentUser, setCurrentUser] = useState(null); // null = Guest browsing mode
+  const [pendingItemToAdd, setPendingItemToAdd] = useState(null); // Lưu món khách chọn trước khi đăng nhập
 
   // Navigation state per role
   const [customerTab, setCustomerTab] = useState('HOME'); // 'HOME' | 'MENU' | 'ORDERS' | 'ACCOUNT'
@@ -72,10 +92,106 @@ export default function App() {
   const [isSuccessModalVisible, setIsSuccessModalVisible] = useState(false);
   const [latestCreatedOrder, setLatestCreatedOrder] = useState(null);
   const [isLoginModalVisible, setIsLoginModalVisible] = useState(false);
+  const [isAccountModalVisible, setIsAccountModalVisible] = useState(false);
   const [isAddressModalVisible, setIsAddressModalVisible] = useState(false);
   const [isSearchModalVisible, setIsSearchModalVisible] = useState(false);
 
+  // Security Guard: Tách biệt hoàn toàn - nếu không có quyền STAFF/OWNER thì chỉ được ở giao diện CUSTOMER
+  const guardedRole = useMemo(() => {
+    if (activeRole === 'STAFF' && currentUser?.role !== 'STAFF') {
+      return 'CUSTOMER';
+    }
+    if (activeRole === 'OWNER' && currentUser?.role !== 'OWNER') {
+      return 'CUSTOMER';
+    }
+    return activeRole;
+  }, [activeRole, currentUser]);
+
   const mainScrollRef = useRef(null);
+
+  // ==========================================================
+  // REAL-TIME WEBSOCKET & BACKEND API DATA SYNCHRONIZATION
+  // ==========================================================
+  useEffect(() => {
+    // 1. Initialize real-time WebSocket connection
+    initSocketClient();
+
+    // Subscribe to new incoming orders in real time
+    const unsubOrderCreated = subscribeOrderCreated((newOrder) => {
+      setOrders((prev) => {
+        const orderId = newOrder.id;
+        const exists = prev.some(
+          (o) => o.id === orderId || o.orderCode === (newOrder.orderCode || newOrder.order_code)
+        );
+        if (exists) return prev;
+        return [newOrder, ...prev];
+      });
+    });
+
+    // Subscribe to order status updates (e.g. Barista confirmed or order ready)
+    const unsubOrderStatus = subscribeOrderStatusUpdated((updated) => {
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === updated.id || o.orderCode === (updated.orderCode || updated.order_code)
+            ? { ...o, ...updated }
+            : o
+        )
+      );
+    });
+
+    // Subscribe to store online order status changes
+    const unsubStore = subscribeStoreStatusUpdated((store) => {
+      if (store.is_accepting_orders !== undefined) {
+        setIsAcceptingOrders(Boolean(store.is_accepting_orders));
+      }
+    });
+
+    // Subscribe to product stock / availability changes
+    const unsubProduct = subscribeProductAvailabilityUpdated(({ productId, is_available }) => {
+      setProducts((prev) =>
+        prev.map((p) => (p.id === productId ? { ...p, is_available } : p))
+      );
+    });
+
+    // 2. Fetch Initial Dynamic Data from SQL Server Backend
+    fetchStoreStatus().then((store) => {
+      if (store) {
+        setStoreSettings(store);
+        setIsAcceptingOrders(Boolean(store.is_accepting_orders));
+      }
+    });
+
+    fetchCategories().then((cats) => {
+      if (cats && cats.length > 0) {
+        setCategories(cats);
+      }
+    });
+
+    fetchProducts().then((prods) => {
+      if (prods && prods.length > 0) {
+        setProducts(prods);
+      }
+    });
+
+    fetchAllOrders().then((ords) => {
+      if (ords && ords.length > 0) {
+        setOrders(ords);
+      }
+    });
+
+    fetchCustomerAddresses().then((addrs) => {
+      if (addrs && addrs.length > 0) {
+        setSelectedAddress(addrs[0]);
+      }
+    });
+
+    return () => {
+      unsubOrderCreated();
+      unsubOrderStatus();
+      unsubStore();
+      unsubProduct();
+    };
+  }, []);
 
   // Cart Management
   const handleOpenDetail = (product) => {
@@ -84,6 +200,13 @@ export default function App() {
   };
 
   const handleAddToCart = (customizedItem) => {
+    // Yêu cầu bảo mật: Khách xem trước thoải mái, nhưng khi ấn mua/thêm vào giỏ thì buộc phải đăng nhập/đăng ký
+    if (!currentUser) {
+      setPendingItemToAdd(customizedItem);
+      setIsDetailModalVisible(false);
+      setIsLoginModalVisible(true);
+      return;
+    }
     setCart((prev) => [...prev, customizedItem]);
   };
 
@@ -109,55 +232,80 @@ export default function App() {
     setCart((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Checkout flow -> Opens ticket-style OrderSuccessModal
-  const handleCheckout = (orderData) => {
-    const nextSeqNum = `#${String(orders.length + 1).padStart(3, '0')}`;
-    const newOrder = {
-      id: Date.now(),
-      orderCode: `ANT-${Math.floor(1000 + Math.random() * 9000)}`,
-      sequence_number: nextSeqNum,
-      status: 'PENDING',
-      customer_name: orderData.address?.recipient_name || currentUser.name || 'Khách hàng',
-      phone: orderData.address?.phone || currentUser.phone || '0901 234 567',
-      address: orderData.address?.address_detail || '123 Nguyễn Huệ, P. Bến Nghé, Q.1',
-      created_at: 'Vừa xong',
-      estimated_delivery: '15 - 25 phút',
-      items: orderData.items.map((it) => ({
-        name: it.product.name,
-        quantity: it.quantity,
-        price: it.unitPrice || it.totalPrice,
-        totalPrice: it.totalPrice,
-        options: `${it.selectedSize?.name || 'Size S'}, ${it.selectedIce?.name || '100% Đá'}, ${
-          it.selectedSugar?.name || '100% Đường'
-        }${
-          it.selectedToppings?.length
-            ? `, +${it.selectedToppings.map((t) => t.name).join(', ')}`
-            : ''
-        }`,
-      })),
-      total_amount: orderData.totalAmount,
-      payment_status: orderData.paymentMethod === 'CASH' ? 'UNPAID' : 'PAID',
-      payment_method:
-        orderData.paymentMethod === 'MOMO'
-          ? 'Ví MoMo'
-          : orderData.paymentMethod === 'BANK'
-          ? 'VietQR'
-          : 'Tiền mặt khi nhận',
-      driver: null,
+  // Checkout flow -> Posts to Backend API and opens ticket-style OrderSuccessModal
+  const handleCheckout = async (orderData) => {
+    const payload = {
+      address: orderData.address,
+      items: orderData.items,
+      subtotalAmount: orderData.subtotal,
+      shippingFee: orderData.shippingFee,
+      discountAmount: orderData.discount,
+      totalAmount: orderData.totalAmount,
+      voucherCode: orderData.voucher?.code,
+      paymentMethod: orderData.paymentMethod,
+      customerNote: orderData.orderNote,
     };
 
-    // Add to orders queue, clear cart, close cart, show OrderSuccessModal!
-    setOrders((prev) => [newOrder, ...prev]);
+    try {
+      const created = await checkoutOrder(payload);
+      if (created) {
+        setOrders((prev) => [created, ...prev.filter((o) => o.id !== created.id)]);
+        setLatestCreatedOrder(created);
+      }
+    } catch (err) {
+      console.warn('[Checkout Fallback to Optimistic]', err);
+      const nextSeqNum = `#${String(orders.length + 1).padStart(3, '0')}`;
+      const fallbackOrder = {
+        id: Date.now(),
+        orderCode: `ANT-${Math.floor(1000 + Math.random() * 9000)}`,
+        sequence_number: nextSeqNum,
+        status: 'PENDING',
+        customer_name: orderData.address?.recipient_name || currentUser.name || 'Khách hàng',
+        phone: orderData.address?.phone || currentUser.phone || '0901 234 567',
+        address: orderData.address?.address_detail || '123 Nguyễn Huệ, P. Bến Nghé, Q.1',
+        created_at: 'Vừa xong',
+        estimated_delivery: '15 - 25 phút',
+        items: orderData.items.map((it) => ({
+          name: it.product.name,
+          quantity: it.quantity,
+          price: it.unitPrice || it.totalPrice,
+          totalPrice: it.totalPrice,
+          options: `${it.selectedSize?.name || 'Size S'}, ${it.selectedIce?.name || '100% Đá'}, ${
+            it.selectedSugar?.name || '100% Đường'
+          }${
+            it.selectedToppings?.length
+              ? `, +${it.selectedToppings.map((t) => t.name).join(', ')}`
+              : ''
+          }`,
+        })),
+        total_amount: orderData.totalAmount,
+        payment_status: orderData.paymentMethod === 'CASH' ? 'UNPAID' : 'PAID',
+        payment_method:
+          orderData.paymentMethod === 'MOMO'
+            ? 'Ví MoMo'
+            : orderData.paymentMethod === 'BANK'
+            ? 'VietQR'
+            : 'Tiền mặt khi nhận',
+        driver: null,
+      };
+      setOrders((prev) => [fallbackOrder, ...prev]);
+      setLatestCreatedOrder(fallbackOrder);
+    }
+
     setCart([]);
     setIsCartModalVisible(false);
-    setLatestCreatedOrder(newOrder);
     setIsSuccessModalVisible(true);
   };
 
-  const handleCancelOrder = (orderId) => {
+  const handleCancelOrder = async (orderId) => {
     setOrders((prev) =>
       prev.map((o) => (o.id === orderId ? { ...o, status: 'CANCELLED' } : o))
     );
+    try {
+      await apiUpdateOrderStatus(orderId, 'CANCELLED', 'Khách hàng tự hủy đơn');
+    } catch (e) {
+      console.warn('[Cancel Order Error]', e.message);
+    }
   };
 
   const handleReorder = (order) => {
@@ -183,7 +331,7 @@ export default function App() {
   };
 
   // Staff POS actions
-  const handleUpdateOrderStatus = (orderId, nextStatus) => {
+  const handleUpdateOrderStatus = async (orderId, nextStatus) => {
     setOrders((prev) =>
       prev.map((o) => {
         if (o.id === orderId) {
@@ -196,18 +344,57 @@ export default function App() {
         return o;
       })
     );
+    try {
+      await apiUpdateOrderStatus(orderId, nextStatus);
+    } catch (e) {
+      console.warn('[Update Status Error]', e.message);
+    }
   };
 
-  const handleToggleProductAvailability = (productId) => {
+  const handleToggleProductAvailability = async (productId) => {
     setProducts((prev) =>
       prev.map((p) => (p.id === productId ? { ...p, is_available: !p.is_available } : p))
     );
+    try {
+      await apiToggleAvailability(productId);
+    } catch (e) {
+      console.warn('[Toggle Availability Error]', e.message);
+    }
   };
 
   // Authentication login handler
   const handleLoginSuccess = ({ role, user }) => {
     setCurrentUser(user);
     setActiveRole(role);
+
+    if (role === 'CUSTOMER') {
+      // Nếu trước đó khách đã chọn món đồ uống trước khi đăng nhập thì tự động thêm vào giỏ
+      if (pendingItemToAdd) {
+        setCart((prev) => [...prev, pendingItemToAdd]);
+        setPendingItemToAdd(null);
+      }
+      fetchCustomerAddresses().then((addrs) => {
+        if (addrs && addrs.length > 0) {
+          setSelectedAddress(addrs[0]);
+        }
+      });
+    } else if (role === 'STAFF') {
+      setPendingItemToAdd(null);
+      setStaffTab('ORDERS');
+    } else if (role === 'OWNER') {
+      setPendingItemToAdd(null);
+      setOwnerTab('OVERVIEW');
+    }
+  };
+
+  // Đăng xuất và đưa giao diện về chế độ Khách vãng lai (Guest) an toàn
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setActiveRole('CUSTOMER');
+    setCart([]);
+    setPendingItemToAdd(null);
+    setCustomerTab('HOME');
+    setIsAccountModalVisible(false);
   };
 
   // Bottom Navigation tab selection
@@ -218,9 +405,17 @@ export default function App() {
     } else if (tabKey === 'MENU') {
       mainScrollRef.current?.scrollTo({ y: 340, animated: true });
     } else if (tabKey === 'ORDERS') {
-      setIsOrderTrackingVisible(true);
+      if (!currentUser) {
+        setIsLoginModalVisible(true);
+      } else {
+        setIsOrderTrackingVisible(true);
+      }
     } else if (tabKey === 'ACCOUNT') {
-      setIsLoginModalVisible(true);
+      if (!currentUser) {
+        setIsLoginModalVisible(true);
+      } else {
+        setIsAccountModalVisible(true);
+      }
     }
   };
 
@@ -232,13 +427,23 @@ export default function App() {
     setOwnerTab(tabKey);
   };
 
-  const handleCentralAction = () => {
-    if (activeRole === 'CUSTOMER') {
-      setIsCartModalVisible(true);
-    } else if (activeRole === 'STAFF') {
+  const handleCentralAction = async () => {
+    if (guardedRole === 'CUSTOMER') {
+      if (!currentUser && cart.length === 0) {
+        setIsLoginModalVisible(true);
+      } else {
+        setIsCartModalVisible(true);
+      }
+    } else if (guardedRole === 'STAFF') {
       setStaffTab('ORDERS');
-    } else if (activeRole === 'OWNER') {
-      setIsAcceptingOrders((prev) => !prev);
+    } else if (guardedRole === 'OWNER') {
+      const nextVal = !isAcceptingOrders;
+      setIsAcceptingOrders(nextVal);
+      try {
+        await toggleStoreAcceptingOrders();
+      } catch (e) {
+        console.warn('[Toggle Accepting Orders Error]', e.message);
+      }
     }
   };
 
@@ -288,19 +493,23 @@ export default function App() {
 
         {/* Global Multi-role Header */}
         <Header
-          activeRole={activeRole}
-          onRoleChange={setActiveRole}
+          activeRole={guardedRole}
           cartCount={totalCartCount}
           onOpenCart={() => setIsCartModalVisible(true)}
           selectedAddress={selectedAddress}
-          onOpenAddressModal={() => setIsAddressModalVisible(true)}
+          onOpenAddressModal={() => {
+            if (!currentUser) setIsLoginModalVisible(true);
+            else setIsAddressModalVisible(true);
+          }}
           isAcceptingOrders={isAcceptingOrders}
           currentUser={currentUser}
           onOpenLogin={() => setIsLoginModalVisible(true)}
+          onOpenAccount={() => setIsAccountModalVisible(true)}
+          onLogout={handleLogout}
         />
 
         {/* VIEW 1: CUSTOMER VIEW */}
-        {activeRole === 'CUSTOMER' && (
+        {guardedRole === 'CUSTOMER' && (
           <View style={styles.contentContainer}>
             {/* Store Closed Banner if Owner disabled accepting orders */}
             {!isAcceptingOrders && (
@@ -507,7 +716,7 @@ export default function App() {
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.categoriesScroll}
                 >
-                  {CATEGORIES.map((cat) => {
+                  {categories.map((cat) => {
                     const isSelected = selectedCategory === cat.id;
                     return (
                       <TouchableOpacity
@@ -549,7 +758,7 @@ export default function App() {
               <View style={styles.catalogSection}>
                 <View style={styles.catalogHeader}>
                   <Text style={styles.catalogTitle}>
-                    {CATEGORIES.find((c) => c.id === selectedCategory)?.name || 'Menu'}
+                    {categories.find((c) => c.id === selectedCategory)?.name || 'Menu'}
                   </Text>
                   <Text style={styles.catalogCount}>({filteredProducts.length} món)</Text>
                 </View>
@@ -616,8 +825,8 @@ export default function App() {
           </View>
         )}
 
-        {/* VIEW 2: STAFF POS VIEW */}
-        {activeRole === 'STAFF' && (
+        {/* VIEW 2: STAFF POS VIEW (Phân tách bảo mật) */}
+        {guardedRole === 'STAFF' && (
           <StaffView
             orders={orders}
             onUpdateOrderStatus={handleUpdateOrderStatus}
@@ -629,8 +838,8 @@ export default function App() {
           />
         )}
 
-        {/* VIEW 3: OWNER ADMIN VIEW */}
-        {activeRole === 'OWNER' && (
+        {/* VIEW 3: OWNER ADMIN VIEW (Phân tách bảo mật) */}
+        {guardedRole === 'OWNER' && (
           <OwnerView
             isAcceptingOrders={isAcceptingOrders}
             onToggleAcceptingOrders={() => setIsAcceptingOrders(!isAcceptingOrders)}
@@ -643,17 +852,17 @@ export default function App() {
 
         {/* Universal Floating Bottom Navigation for all roles */}
         <FloatingBottomNav
-          activeRole={activeRole}
+          activeRole={guardedRole}
           currentTab={
-            activeRole === 'CUSTOMER'
+            guardedRole === 'CUSTOMER'
               ? customerTab
-              : activeRole === 'STAFF'
+              : guardedRole === 'STAFF'
               ? staffTab
               : ownerTab
           }
           onSelectTab={(tabKey) => {
-            if (activeRole === 'CUSTOMER') handleSelectCustomerTab(tabKey);
-            else if (activeRole === 'STAFF') handleSelectStaffTab(tabKey);
+            if (guardedRole === 'CUSTOMER') handleSelectCustomerTab(tabKey);
+            else if (guardedRole === 'STAFF') handleSelectStaffTab(tabKey);
             else handleSelectOwnerTab(tabKey);
           }}
           cartCount={totalCartCount}
@@ -685,9 +894,15 @@ export default function App() {
           onCheckout={handleCheckout}
           selectedAddress={selectedAddress}
           onOpenAddressModal={() => {
-            setIsAddressModalVisible(true);
+            if (!currentUser) setIsLoginModalVisible(true);
+            else setIsAddressModalVisible(true);
           }}
           shippingFee={STORE_SETTINGS.default_shipping_fee}
+          currentUser={currentUser}
+          onRequireLogin={() => {
+            setIsCartModalVisible(false);
+            setIsLoginModalVisible(true);
+          }}
         />
 
         {/* Order Completion Screen (Flight-Ticket Style) */}
@@ -715,7 +930,17 @@ export default function App() {
           visible={isLoginModalVisible}
           onClose={() => setIsLoginModalVisible(false)}
           onLoginSuccess={handleLoginSuccess}
-          initialRole={activeRole}
+          initialRole={guardedRole}
+        />
+
+        {/* Customer Account & Profile Modal */}
+        <AccountModal
+          visible={isAccountModalVisible}
+          onClose={() => setIsAccountModalVisible(false)}
+          currentUser={currentUser}
+          onLogout={handleLogout}
+          onOpenAddressModal={() => setIsAddressModalVisible(true)}
+          onOpenOrderTracking={() => setIsOrderTrackingVisible(true)}
         />
 
         {/* Address Selection Modal */}

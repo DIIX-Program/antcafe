@@ -15,6 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOWS, RADIUS, TYPOGRAPHY, TOUCH_TARGET } from '../theme/theme';
 import { VOUCHERS } from '../data/mockData';
+import { fetchVouchers, applyVoucherCode } from '../api/services';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -55,7 +56,10 @@ export default function CartModal({
   selectedAddress,
   onOpenAddressModal,
   shippingFee = 15000,
+  currentUser = null,
+  onRequireLogin,
 }) {
+  const [voucherList, setVoucherList] = useState(VOUCHERS);
   const [selectedVoucher, setSelectedVoucher] = useState(null);
   const [voucherCodeInput, setVoucherCodeInput] = useState('');
   const [voucherError, setVoucherError] = useState('');
@@ -63,6 +67,18 @@ export default function CartModal({
   const [needCutlery, setNeedCutlery] = useState(false);
   const [orderNote, setOrderNote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  React.useEffect(() => {
+    if (visible) {
+      fetchVouchers()
+        .then((vouchers) => {
+          if (vouchers && vouchers.length > 0) {
+            setVoucherList(vouchers);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [visible]);
 
   // Calculations
   const subtotal = cartItems.reduce((sum, item) => sum + item.totalPrice, 0);
@@ -79,12 +95,28 @@ export default function CartModal({
   const effectiveShipping = subtotal > 0 ? (isFreeShipEligible ? 0 : shippingFee) : 0;
   const finalTotal = Math.max(0, subtotal + effectiveShipping - discount);
 
-  const handleApplyVoucherCode = () => {
+  const handleApplyVoucherCode = async () => {
     setVoucherError('');
     const code = voucherCodeInput.trim().toUpperCase();
     if (!code) return;
 
-    const found = VOUCHERS.find((v) => v.code === code);
+    try {
+      const applied = await applyVoucherCode(code, subtotal);
+      if (applied?.code) {
+        setSelectedVoucher({
+          code: applied.code,
+          title: applied.title,
+          discount: applied.discount_amount || applied.discount,
+          minOrder: applied.minOrder || 0,
+        });
+        setVoucherCodeInput('');
+        return;
+      }
+    } catch (e) {
+      // Fallback to local search
+    }
+
+    const found = voucherList.find((v) => v.code === code);
     if (!found) {
       setVoucherError('Mã không hợp lệ hoặc đã hết hạn');
       return;
@@ -138,6 +170,12 @@ export default function CartModal({
 
   const handleProceedCheckout = () => {
     if (cartItems.length === 0 || isSubmitting) return;
+    if (!currentUser) {
+      if (onRequireLogin) {
+        onRequireLogin();
+      }
+      return;
+    }
     setIsSubmitting(true);
     setTimeout(() => {
       onCheckout({
@@ -595,7 +633,9 @@ export default function CartModal({
                   activeOpacity={0.88}
                 >
                   <Text style={styles.checkoutBtnText}>
-                    Đặt đơn • {finalTotal.toLocaleString('vi-VN')}đ
+                    {currentUser
+                      ? `Đặt đơn • ${finalTotal.toLocaleString('vi-VN')}đ`
+                      : `Đăng nhập để đặt đơn • ${finalTotal.toLocaleString('vi-VN')}đ`}
                   </Text>
                   <Ionicons name="arrow-forward" size={17} color="#FFF" />
                 </TouchableOpacity>
