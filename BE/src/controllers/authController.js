@@ -273,3 +273,77 @@ export async function changePassword(req, res) {
     return res.status(500).json({ success: false, message: 'Lỗi đổi mật khẩu' });
   }
 }
+
+export async function googleLogin(req, res) {
+  try {
+    const { email, full_name, avatar_url } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Vui lòng cung cấp email Google' });
+    }
+
+    const pool = await getDbPool();
+    const cleanEmail = email.trim().toLowerCase();
+
+    // 1. Kiểm tra tài khoản đã tồn tại hay chưa
+    const userRes = await pool.request()
+      .input('email', sql.NVarChar(150), cleanEmail)
+      .query(`
+        SELECT id, phone, email, full_name, avatar_url, role, status, loyalty_points 
+        FROM users 
+        WHERE email = @email AND deleted_at IS NULL
+      `);
+
+    let user = null;
+    if (userRes.recordset.length > 0) {
+      user = userRes.recordset[0];
+      await pool.request()
+        .input('id', sql.BigInt, user.id)
+        .input('avatar', sql.NVarChar(500), avatar_url || user.avatar_url)
+        .query('UPDATE users SET last_login_at = SYSDATETIME(), avatar_url = COALESCE(@avatar, avatar_url) WHERE id = @id');
+    } else {
+      // 2. Tạo tài khoản khách hàng mới bằng Google
+      const generatedPhone = '098' + Math.floor(1000000 + Math.random() * 9000000);
+      const insertReq = pool.request();
+      insertReq.input('phone', sql.VarChar(15), generatedPhone);
+      insertReq.input('email', sql.VarChar(150), cleanEmail);
+      insertReq.input('full_name', sql.NVarChar(100), full_name || 'Khách hàng Google');
+      insertReq.input('avatar_url', sql.NVarChar(500), avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200');
+
+      const createRes = await insertReq.query(`
+        INSERT INTO users (phone, email, password_hash, full_name, role, status, loyalty_points, avatar_url)
+        OUTPUT INSERTED.id, INSERTED.phone, INSERTED.email, INSERTED.full_name, INSERTED.role, INSERTED.loyalty_points, INSERTED.avatar_url
+        VALUES (@phone, @email, 'GOOGLE_OAUTH_AUTH', @full_name, 'CUSTOMER', 'ACTIVE', 100, @avatar_url)
+      `);
+      user = createRes.recordset[0];
+    }
+
+    const token = generateToken({
+      id: user.id,
+      phone: user.phone,
+      role: user.role,
+      name: user.full_name,
+    });
+
+    return res.json({
+      success: true,
+      message: 'Đăng nhập Google thành công!',
+      data: {
+        token,
+        role: user.role,
+        user: {
+          id: user.id,
+          name: user.full_name,
+          phone: user.phone,
+          email: user.email,
+          avatar: user.avatar_url,
+          role: user.role,
+          loyalty_points: user.loyalty_points,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('[Auth] Google Login error:', error);
+    return res.status(500).json({ success: false, message: 'Lỗi đăng nhập Google', error: error.message });
+  }
+}
+

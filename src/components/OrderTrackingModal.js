@@ -26,19 +26,42 @@ export default function OrderTrackingModal({
   onClose,
   onCancelOrder,
   onReorder,
+  currentUser,
+  onRequireLogin,
 }) {
   const [selectedOrderId, setSelectedOrderId] = React.useState(null);
 
-  // Set default selected order to latest
+  // Yêu cầu cốt lõi: Chỉ người dùng đã đăng nhập mới xem được, và CHỈ xem đơn của chính mình!
+  const myOrders = React.useMemo(() => {
+    if (!currentUser) return [];
+    if (!orders || orders.length === 0) return [];
+
+    return orders.filter((o) => {
+      // 1. Khớp customer_id
+      const orderCustId = o.customer_id || o.customerId;
+      if (orderCustId && currentUser.id && String(orderCustId) === String(currentUser.id)) {
+        return true;
+      }
+      // 2. Khớp số điện thoại
+      const oPhone = (o.phone || o.recipient_phone || '').replace(/\D/g, '');
+      const uPhone = (currentUser.phone || '').replace(/\D/g, '');
+      if (oPhone && uPhone && (oPhone === uPhone || uPhone.endsWith(oPhone) || oPhone.endsWith(uPhone))) {
+        return true;
+      }
+      return false;
+    });
+  }, [orders, currentUser]);
+
+  // Set default selected order to latest of user's own orders
   React.useEffect(() => {
-    if (orders && orders.length > 0) {
-      if (!selectedOrderId || !orders.find((o) => o.id === selectedOrderId)) {
-        setSelectedOrderId(orders[0].id);
+    if (myOrders && myOrders.length > 0) {
+      if (!selectedOrderId || !myOrders.find((o) => o.id === selectedOrderId)) {
+        setSelectedOrderId(myOrders[0].id);
       }
     }
-  }, [orders, visible]);
+  }, [myOrders, visible]);
 
-  const currentOrder = orders?.find((o) => o.id === selectedOrderId) || orders?.[0];
+  const currentOrder = myOrders?.find((o) => o.id === selectedOrderId) || myOrders?.[0];
 
   const getStepIndex = (status) => {
     switch (status) {
@@ -75,19 +98,40 @@ export default function OrderTrackingModal({
           <View style={styles.header}>
             <View style={styles.headerTitleWrap}>
               <Ionicons name="receipt-outline" size={22} color={COLORS.primary} />
-              <Text style={styles.headerTitle}>Đơn hàng của bạn</Text>
+              <Text style={styles.headerTitle}>Tiến trình đơn hàng của bạn</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.7}>
               <Ionicons name="close" size={22} color={COLORS.textSecondary} />
             </TouchableOpacity>
           </View>
 
-          {(!orders || orders.length === 0) ? (
+          {!currentUser ? (
+            <View style={styles.emptyContainer}>
+              <View style={styles.lockIconBox}>
+                <Ionicons name="lock-closed" size={38} color={COLORS.primary} />
+              </View>
+              <Text style={styles.emptyTitle}>Chỉ xem được khi đăng nhập</Text>
+              <Text style={styles.emptySub}>
+                Tiến trình đặt món chỉ hiển thị cho tài khoản cá nhân của bạn. Vui lòng đăng nhập để xem đơn hàng của chính bạn!
+              </Text>
+              <TouchableOpacity
+                style={styles.loginBtn}
+                onPress={() => {
+                  onClose();
+                  if (onRequireLogin) onRequireLogin();
+                }}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="log-in-outline" size={18} color="#FFF" />
+                <Text style={styles.loginBtnText}>Đăng nhập tài khoản</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (!myOrders || myOrders.length === 0) ? (
             <View style={styles.emptyContainer}>
               <Ionicons name="documents-outline" size={56} color={COLORS.textMuted} />
-              <Text style={styles.emptyTitle}>Chưa có đơn hàng nào</Text>
+              <Text style={styles.emptyTitle}>Bạn chưa có đơn hàng nào</Text>
               <Text style={styles.emptySub}>
-                Các đơn hàng bạn đặt sẽ xuất hiện tại đây để theo dõi tiến trình pha chế trực tiếp!
+                Tài khoản ({currentUser.name || currentUser.phone}) chưa có đơn nào đang đặt. Các đơn hàng bạn đặt sẽ xuất hiện tại đây để theo dõi tiến trình pha chế trực tiếp!
               </Text>
             </View>
           ) : (
@@ -102,7 +146,7 @@ export default function OrderTrackingModal({
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.orderTabsScroll}
               >
-                {orders.map((ord) => {
+                {myOrders.map((ord) => {
                   const isSelected = ord.id === currentOrder?.id;
                   return (
                     <TouchableOpacity
@@ -421,6 +465,31 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     textAlign: 'center',
     lineHeight: 18,
+  },
+  lockIconBox: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: COLORS.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  loginBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: RADIUS.md,
+    marginTop: 18,
+    ...SHADOWS.sm,
+  },
+  loginBtnText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
   orderTabsScroll: {
     gap: 8,

@@ -74,3 +74,17 @@ export function emitProductAvailabilityUpdated(payload) {
     ioInstance.emit('product:availability_updated', payload);
   }
 }
+
+// Broadcast real-time order payment status updates (PAID, REFUNDED)
+export function emitOrderPaymentUpdated(order) {
+  if (ioInstance) {
+    const code = order.order_code || order.orderCode;
+    console.log(`[Socket.IO] Emitting order:payment_updated for #${code}: payment_status=${order.payment_status}`);
+    ioInstance.to('room:orders').emit('order:payment_updated', order);
+    if (order.customer_id) {
+      ioInstance.to(`customer_${order.customer_id}`).emit('order:payment_updated', order);
+    }
+    ioInstance.emit('order:payment_updated', order);
+  }
+}
+

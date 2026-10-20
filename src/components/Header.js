@@ -45,24 +45,24 @@ export default function Header({
   // 1. STAFF POS HEADER
   if (activeRole === 'STAFF') {
     return (
-      <View style={[styles.container, webGlass]}>
-        <View style={styles.topRow}>
-          <View style={styles.brandContainer}>
+      <View style={[styles.container, styles.staffOwnerContainer, webGlass]}>
+        <View style={styles.topRowResponsive}>
+          <View style={styles.brandContainerResponsive}>
             <Image
               source={require('../../img/logo.png')}
-              style={styles.logo}
+              style={styles.logoCompact}
               resizeMode="contain"
             />
-            <View>
-              <Text style={styles.brandName}>ANT COFFEE</Text>
+            <View style={styles.brandTextWrap}>
+              <Text style={styles.brandName} numberOfLines={1}>ANT COFFEE</Text>
               <View style={[styles.roleBadge, { backgroundColor: '#EFF6FF' }]}>
-                <Ionicons name="receipt" size={12} color={COLORS.primary} />
-                <Text style={[styles.roleBadgeText, { color: COLORS.primary }]}>QUẦY THU NGÂN & POS</Text>
+                <Ionicons name="receipt" size={11} color={COLORS.primary} />
+                <Text style={[styles.roleBadgeText, { color: COLORS.primary }]} numberOfLines={1}>POS THU NGÂN</Text>
               </View>
             </View>
           </View>
 
-          <View style={styles.actionRow}>
+          <View style={styles.actionRowResponsive}>
             <View style={styles.userInfoWrap}>
               <Text style={styles.userRoleText}>Nhân viên</Text>
               <Text style={styles.userRoleName} numberOfLines={1}>
@@ -75,7 +75,7 @@ export default function Header({
               onPress={handlePromptLogout}
               activeOpacity={0.8}
             >
-              <Ionicons name="log-out-outline" size={18} color={COLORS.accentRed} />
+              <Ionicons name="log-out-outline" size={16} color={COLORS.accentRed} />
               <Text style={styles.logoutBtnText}>Thoát ca</Text>
             </TouchableOpacity>
           </View>
@@ -87,24 +87,24 @@ export default function Header({
   // 2. OWNER DASHBOARD HEADER
   if (activeRole === 'OWNER') {
     return (
-      <View style={[styles.container, webGlass]}>
-        <View style={styles.topRow}>
-          <View style={styles.brandContainer}>
+      <View style={[styles.container, styles.staffOwnerContainer, webGlass]}>
+        <View style={styles.topRowResponsive}>
+          <View style={styles.brandContainerResponsive}>
             <Image
               source={require('../../img/logo.png')}
-              style={styles.logo}
+              style={styles.logoCompact}
               resizeMode="contain"
             />
-            <View>
-              <Text style={styles.brandName}>ANT COFFEE</Text>
+            <View style={styles.brandTextWrap}>
+              <Text style={styles.brandName} numberOfLines={1}>ANT COFFEE</Text>
               <View style={[styles.roleBadge, { backgroundColor: '#FEF3C7' }]}>
-                <Ionicons name="storefront" size={12} color="#D97706" />
-                <Text style={[styles.roleBadgeText, { color: '#B45309' }]}>QUẢN TRỊ CỬA HÀNG</Text>
+                <Ionicons name="storefront" size={11} color="#D97706" />
+                <Text style={[styles.roleBadgeText, { color: '#B45309' }]} numberOfLines={1}>CHỦ QUÁN</Text>
               </View>
             </View>
           </View>
 
-          <View style={styles.actionRow}>
+          <View style={styles.actionRowResponsive}>
             <View style={styles.userInfoWrap}>
               <Text style={styles.userRoleText}>Chủ quán</Text>
               <Text style={styles.userRoleName} numberOfLines={1}>
@@ -117,7 +117,7 @@ export default function Header({
               onPress={handlePromptLogout}
               activeOpacity={0.8}
             >
-              <Ionicons name="log-out-outline" size={18} color={COLORS.accentRed} />
+              <Ionicons name="log-out-outline" size={16} color={COLORS.accentRed} />
               <Text style={styles.logoutBtnText}>Đăng xuất</Text>
             </TouchableOpacity>
           </View>
@@ -237,14 +237,43 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 8,
   },
+  topRowResponsive: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 0,
+    width: '100%',
+  },
+  staffOwnerContainer: {
+    paddingVertical: 8,
+  },
   brandContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+    minWidth: 0,
+    marginRight: 8,
+  },
+  brandContainerResponsive: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    minWidth: 0,
+    marginRight: 6,
+  },
+  brandTextWrap: {
+    flexShrink: 1,
+    minWidth: 0,
   },
   logo: {
     width: 38,
     height: 38,
     marginRight: 10,
+  },
+  logoCompact: {
+    width: 32,
+    height: 32,
+    marginRight: 6,
   },
   brandName: {
     fontSize: 16,
@@ -276,6 +305,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 4,
     marginTop: 2,
+    alignSelf: 'flex-start',
   },
   roleBadgeText: {
     fontSize: 10,
@@ -286,6 +316,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    flexShrink: 0,
+  },
+  actionRowResponsive: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
+    gap: 6,
   },
   cartButton: {
     width: 40,
@@ -359,32 +396,36 @@ const styles = StyleSheet.create({
   },
   userInfoWrap: {
     alignItems: 'flex-end',
-    marginRight: 4,
+    justifyContent: 'center',
+    marginRight: 2,
+    maxWidth: 95,
   },
   userRoleText: {
     fontSize: 10,
     fontWeight: '600',
     color: COLORS.textSecondary,
+    lineHeight: 12,
   },
   userRoleName: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     color: COLORS.textPrimary,
-    maxWidth: 100,
+    lineHeight: 16,
+    maxWidth: 95,
   },
   logoutBtnSmall: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
     backgroundColor: '#FEF2F2',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 16,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: RADIUS.sm,
     borderWidth: 1,
     borderColor: '#FEE2E2',
   },
   logoutBtnText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: COLORS.accentRed,
   },
