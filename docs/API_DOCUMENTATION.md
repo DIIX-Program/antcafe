@@ -316,7 +316,9 @@ Authorization: Bearer <access_token>
 ### 3.5. Phân Hệ Đơn Hàng & Đặt Hàng (Orders) (`/api/v1/orders`)
 
 #### `POST /api/v1/orders/checkout`
-- **Mô tả:** Đặt hàng từ Giỏ hàng. Tự động kiểm tra giá tại thời điểm đặt, sinh mã đơn ngẫu nhiên kiểu `ANT-XXXX`, gọi Stored Procedure `sp_generate_daily_queue_number` để sinh số thứ tự trong ngày dạng `A001`, `A002`, lưu snapshot JSON các món đã chọn, và phát thông báo WebSocket `order:created` tới màn hình Thu ngân/Pha chế của nhân viên.
+- **Mô tả:** Đặt hàng từ Giỏ hàng. Hỗ trợ 2 phương thức thanh toán: **Ví MoMo (`MOMO`)** và **Tiền mặt khi nhận (`CASH`)**.
+  - Nếu `payment_method = 'MOMO'`: Server tạo đơn với `payment_status = 'UNPAID'`, tự động gọi MoMo Gateway v2 (Capture Wallet) sinh chữ ký HMAC-SHA256 và trả về các liên kết thanh toán (`payUrl`, `deeplink`, `qrCodeUrl`).
+  - Nếu `payment_method = 'CASH'`: Server tạo đơn với `payment_status = 'UNPAID'` (thu tiền khi shipper giao hàng hoặc tại quầy).
 - **Quyền:** `PUBLIC` hoặc `CUSTOMER` (hỗ trợ cả khách vãng lai và khách đã có tài khoản)
 - **Request Body:**
   ```json
@@ -325,7 +327,7 @@ Authorization: Bearer <access_token>
     "customer_phone": "0901234567",
     "order_type": "DELIVERY",
     "delivery_address": "123 Đường Nguyễn Tri Phương, Quận 5, TP.HCM",
-    "payment_method": "CASH",
+    "payment_method": "MOMO",
     "voucher_code": "ANTNEW",
     "order_note": "Giao trước 11h trưa",
     "items": [
@@ -333,12 +335,9 @@ Authorization: Bearer <access_token>
         "product_id": 1,
         "quantity": 2,
         "selected_options": [
-          { "group_id": 1, "group_name": "Chọn Size", "item_id": 2, "item_name": "Size L (Lớn)", "extra_price": 6000 },
-          { "group_id": 2, "group_name": "Mức Đá", "item_id": 4, "item_name": "70% Đá", "extra_price": 0 },
-          { "group_id": 3, "group_name": "Độ Ngọt (Đường)", "item_id": 8, "item_name": "50% Đường", "extra_price": 0 },
-          { "group_id": 4, "group_name": "Topping Thêm", "item_id": 11, "item_name": "Trân Châu Đen Hoàng Kim", "extra_price": 8000 }
+          { "group_id": 1, "group_name": "Chọn Size", "item_id": 2, "item_name": "Size L (Lớn)", "extra_price": 6000 }
         ],
-        "item_note": "Cho nhiều trân châu"
+        "item_note": "Cho nhiều đá"
       }
     ]
   }
@@ -347,25 +346,26 @@ Authorization: Bearer <access_token>
   ```json
   {
     "success": true,
-    "message": "Đặt hàng thành công",
+    "message": "Đã tạo đơn hàng & tạo liên kết MoMo thành công!",
     "data": {
-      "order": {
-        "id": 1004,
-        "order_code": "ANT-2221",
-        "daily_queue_number": "A004",
-        "status": "PENDING",
-        "subtotal_amount": 92000,
-        "discount_amount": 18400,
-        "shipping_fee": 15000,
-        "final_amount": 88600,
-        "order_type": "DELIVERY",
-        "payment_method": "CASH",
-        "payment_status": "UNPAID",
-        "customer_name": "Nguyễn Văn A",
-        "customer_phone": "0901234567",
-        "created_at": "2026-10-20T03:25:00.000Z"
+      "id": 1004,
+      "order_code": "ANT-2221",
+      "daily_queue_number": "A004",
+      "status": "PENDING",
+      "total_amount": 88600,
+      "payment_method": "Ví MoMo",
+      "payment_status": "UNPAID",
+      "momoPayment": {
+        "success": true,
+        "orderCode": "ANT-2221",
+        "requestId": "ANT-2221_1792500000000",
+        "amount": 88600,
+        "payUrl": "https://test-payment.momo.vn/v2/gateway/pay?t=...",
+        "deeplink": "momo://app?action=payWithApp&...",
+        "qrCodeUrl": "momo://app?action=payWithApp&isScanQR=true..."
       }
-    }
+    },
+    "momoPayment": { ... }
   }
   ```
 
@@ -399,7 +399,85 @@ Authorization: Bearer <access_token>
 
 ---
 
-### 3.6. Phân Hệ Nhân Viên & Điểm Bán POS (`/api/v1/staff`)
+### 3.6. Phân Hệ Cổng Thanh Toán MoMo & Quản Lý Thanh Toán (`/api/v1/payment`)
+
+#### `POST /api/v1/payment/momo/create`
+- **Mô tả:** Khởi tạo phiên thanh toán MoMo v2 (`captureWallet`). Ký chữ ký số HMAC-SHA256 theo chuẩn bảo mật MoMo và trả về liên kết thanh toán (`payUrl`), ứng dụng (`deeplink`), và mã QR (`qrCodeUrl`).
+- **Quyền:** `PUBLIC` / `ALL`
+- **Request Body:**
+  ```json
+  {
+    "orderCode": "ANT-2221",
+    "amount": 88600,
+    "orderInfo": "Thanh toán Ant Coffee cho đơn #ANT-2221"
+  }
+  ```
+- **Response `200 OK`:**
+  ```json
+  {
+    "success": true,
+    "message": "Khởi tạo giao dịch MoMo thành công",
+    "data": {
+      "orderCode": "ANT-2221",
+      "amount": 88600,
+      "payUrl": "https://test-payment.momo.vn/v2/gateway/pay?t=...",
+      "deeplink": "momo://app?action=payWithApp&...",
+      "qrCodeUrl": "momo://app?action=payWithApp&isScanQR=true..."
+    }
+  }
+  ```
+
+#### `POST /api/v1/payment/momo/ipn`
+- **Mô tả:** Webhook tiếp nhận kết quả thanh toán từ Server MoMo (Instant Payment Notification). Tự động xác thực chữ ký HMAC-SHA256, cập nhật `payment_status = 'PAID'` trong SQL Server và phát sự kiện WebSocket `order:payment_updated` theo thời gian thực.
+- **Quyền:** Public Webhook (Xác thực chữ ký MoMo).
+
+#### `GET /api/v1/payment/momo/callback`
+- **Mô tả:** Đường dẫn chuyển hướng khách hàng sau khi thanh toán xong trên Web MoMo. Trả về giao diện thông báo kết quả thân thiện.
+- **Quyền:** `PUBLIC`
+
+#### `GET /api/v1/payment/momo/status/:orderCode`
+- **Mô tả:** Tra cứu trạng thái thanh toán hiện tại của đơn hàng.
+- **Quyền:** `PUBLIC` / `ALL`
+- **Response `200 OK`:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "orderCode": "ANT-2221",
+      "paymentStatus": "PAID",
+      "paymentMethod": "Ví MoMo",
+      "isPaid": true,
+      "transactionRef": "SIM_MOMO_1792500000000"
+    }
+  }
+  ```
+
+#### `POST /api/v1/payment/momo/simulate`
+- **Mô tả:** API giả lập hoàn tất thanh toán MoMo thành công trong môi trường phát triển (Sandbox Development Helper). Giúp người chấm điểm / kiểm thử test toàn bộ luồng thanh toán và cập nhật WebSocket tức thì mà không cần máy có IP tĩnh hay tunnel.
+- **Quyền:** `PUBLIC` / `DEV`
+- **Request Body:**
+  ```json
+  {
+    "orderCode": "ANT-2221"
+  }
+  ```
+- **Response `200 OK`:**
+  ```json
+  {
+    "success": true,
+    "message": "Giả lập thanh toán MoMo thành công cho đơn hàng #ANT-2221",
+    "data": {
+      "order_code": "ANT-2221",
+      "payment_status": "PAID",
+      "payment_method": "MOMO",
+      "payment_transaction_ref": "SIM_MOMO_1792500000000"
+    }
+  }
+  ```
+
+---
+
+### 3.7. Phân Hệ Nhân Viên & Điểm Bán POS (`/api/v1/staff`)
 
 #### `GET /api/v1/staff/orders/queue`
 - **Mô tả:** Lấy danh sách hàng đợi các đơn đang cần xử lý tại quầy bar (`PENDING`, `CONFIRMED`, `PREPARING`, `READY`), sắp xếp theo `created_at ASC` (đến trước làm trước).
@@ -425,7 +503,7 @@ Authorization: Bearer <access_token>
 
 ---
 
-### 3.7. Phân Hệ Quản Trị & Báo Cáo Doanh Thu (`/api/v1/admin`)
+### 3.8. Phân Hệ Quản Trị & Báo Cáo Doanh Thu (`/api/v1/admin`)
 
 #### `GET /api/v1/admin/reports/revenue`
 - **Mô tả:** Thống kê doanh thu theo ngày, tuần, tháng; tổng số đơn hàng thành công, số đơn bị hủy, giá trị trung bình mỗi đơn (AOV) và biểu đồ phân bổ đơn hàng theo khung giờ trong ngày (Hourly sales distribution).
@@ -474,6 +552,7 @@ socket.emit('join:customer', customerUserId);
 | Tên Event | Dữ liệu kèm theo (Payload) | Mô tả & Tác dụng |
 | :--- | :--- | :--- |
 | `order:created` | `{ order }` | Phát ngay khi khách bấm Đặt hàng. Quầy pha chế phát chuông thông báo và hiện thẻ đơn mới trên POS. |
+| `order:payment_updated` | `{ order_code, payment_status, payment_transaction_ref }` | Phát khi có cập nhật thanh toán thành công (Ví dụ: MoMo IPN gửi kết quả). Modal thanh toán của khách tự động đóng và chuyển sang vé thành công tức thì. |
 | `order:status_updated` | `{ order_id, status, cancel_reason, order }` | Phát khi nhân viên chuyển trạng thái đơn (Xác nhận, Đang pha, Sẵn sàng, Hoàn tất, Hủy). App khách hàng tự động cập nhật timeline tiến trình pha chế. |
 | `store:status_updated` | `{ is_accepting_orders, updated_by, timestamp }` | Phát khi quán chuyển chế độ Mở / Ngừng nhận đơn. Toàn bộ App cập nhật banner thông báo tức thì. |
 | `product:availability_updated` | `{ product_id, is_available, updated_by }` | Phát khi nhân viên báo hết món hoặc mở bán lại món. Khách hàng không thể thêm món đã hết vào giỏ. |

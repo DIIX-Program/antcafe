@@ -5,6 +5,7 @@ let socket = null;
 const listeners = {
   orderCreated: new Set(),
   orderStatusUpdated: new Set(),
+  orderPaymentUpdated: new Set(),
   storeStatusUpdated: new Set(),
   productAvailabilityUpdated: new Set(),
 };
@@ -60,6 +61,17 @@ export function initSocketClient() {
     });
   });
 
+  socket.on('order:payment_updated', (order) => {
+    console.log('[Socket] Event order:payment_updated received:', order.orderCode || order.order_code, '->', order.payment_status);
+    listeners.orderPaymentUpdated.forEach((cb) => {
+      try {
+        cb(order);
+      } catch (e) {
+        console.error(e);
+      }
+    });
+  });
+
   socket.on('store:status_updated', (store) => {
     console.log('[Socket] Event store:status_updated received:', store.is_accepting_orders);
     listeners.storeStatusUpdated.forEach((cb) => {
@@ -95,6 +107,11 @@ export function subscribeOrderStatusUpdated(callback) {
   return () => listeners.orderStatusUpdated.delete(callback);
 }
 
+export function subscribeOrderPaymentUpdated(callback) {
+  listeners.orderPaymentUpdated.add(callback);
+  return () => listeners.orderPaymentUpdated.delete(callback);
+}
+
 export function subscribeStoreStatusUpdated(callback) {
   listeners.storeStatusUpdated.add(callback);
   return () => listeners.storeStatusUpdated.delete(callback);
@@ -120,6 +137,7 @@ export default {
   initSocketClient,
   subscribeOrderCreated,
   subscribeOrderStatusUpdated,
+  subscribeOrderPaymentUpdated,
   subscribeStoreStatusUpdated,
   subscribeProductAvailabilityUpdated,
   reconnectSocket,

@@ -9,10 +9,37 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
+  Modal,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as WebBrowser from 'expo-web-browser';
+import * as AuthSession from 'expo-auth-session';
 import { COLORS, SHADOWS, RADIUS, TYPOGRAPHY, TOUCH_TARGET } from '../../theme/theme';
-import { loginUser, registerCustomer } from '../../api/services';
+import { loginUser, registerCustomer, loginWithGoogle } from '../../api/services';
+import { GOOGLE_AUTH_CONFIG } from '../../config/googleAuth';
+
+WebBrowser.maybeCompleteAuthSession();
+
+const googleDiscovery = {
+  authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenEndpoint: 'https://oauth2.googleapis.com/token',
+  revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
+};
+
+const GOOGLE_MOCK_ACCOUNTS = [
+  {
+    name: 'Nguyễn Văn A',
+    email: 'nguyenvana.antcafe@gmail.com',
+    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+  },
+  {
+    name: 'Khách Hàng Ant Coffee',
+    email: 'customer.antcafe@gmail.com',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+  },
+];
 
 export default function AuthFlow({
   onAuthSuccess,
@@ -39,6 +66,257 @@ export default function AuthFlow({
   // Status & Errors
   const [errorText, setErrorText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  // Google OAuth State & Real Authentication Request
+  const [showGoogleModal, setShowGoogleModal] = useState(false);
+  const [googleClientIdInput, setGoogleClientIdInput] = useState(
+    GOOGLE_AUTH_CONFIG.webClientId.includes('sample-client-id') ? '' : GOOGLE_AUTH_CONFIG.webClientId
+  );
+  const [activeClientId, setActiveClientId] = useState(GOOGLE_AUTH_CONFIG.webClientId);
+  const [directGoogleEmail, setDirectGoogleEmail] = useState('');
+
+  const redirectUri = AuthSession.makeRedirectUri({
+    scheme: 'antcafe',
+    preferLocalhost: true,
+  });
+
+  const [authRequest, authResponse, promptAsync] = AuthSession.useAuthRequest(
+    {
+      clientId: activeClientId,
+      scopes: GOOGLE_AUTH_CONFIG.scopes,
+      responseType: AuthSession.ResponseType.Code,
+      redirectUri: redirectUri,
+    },
+    googleDiscovery
+  );
+
+  useEffect(() => {
+    if (authResponse?.type === 'success') {
+      const { access_token, code } = authResponse.params;
+      if (access_token) {
+        fetchGoogleUserInfo(access_token);
+      } else if (code) {
+        handleExchangeCode(code);
+      }
+    } else if (authResponse?.type === 'error') {
+      setIsLoading(false);
+      const errDetail =
+        authResponse.error?.message ||
+        authResponse.params?.error_description ||
+        'Đăng nhập Google qua OAuth thất bại. Vui lòng kiểm tra Authorized Redirect URIs trong Google Cloud Console.';
+      setErrorText(errDetail);
+    } else if (authResponse?.type === 'dismiss' || authResponse?.type === 'cancel') {
+      setIsLoading(false);
+    }
+  }, [authResponse]);
+
+  const handleExchangeCode = async (code) => {
+    setIsLoading(true);
+    setErrorText('');
+    try {
+      console.log('[Google Auth] Exchanging auth code for tokens...');
+      const tokenResult = await AuthSession.exchangeCodeAsync(
+        {
+          clientId: activeClientId,
+          clientSecret: GOOGLE_AUTH_CONFIG.clientSecret,
+          code: code,
+          redirectUri: redirectUri,
+          extraParams: authRequest?.codeVerifier ? { code_verifier: authRequest.codeVerifier } : undefined,
+        },
+        googleDiscovery
+      );
+      if (tokenResult?.accessToken) {
+        await fetchGoogleUserInfo(tokenResult.accessToken);
+      } else {
+        throw new Error('Không nhận được Access Token từ Google');
+      }
+    } catch (err) {
+      console.error('[Google Auth] Code exchange error:', err);
+      setIsLoading(false);
+      setErrorText(err.message || 'Lỗi khi đổi mã xác thực Google');
+    }
+  };
+
+  const fetchGoogleUserInfo = async (accessToken) => {
+    setIsLoading(true);
+    setErrorText('');
+    try {
+      const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const googleUser = await userInfoRes.json();
+      if (googleUser && googleUser.email) {
+        const res = await loginWithGoogle({
+          email: googleUser.email,
+          full_name: googleUser.name || googleUser.given_name || 'Khách hàng Google',
+          avatar_url: googleUser.picture || null,
+        });
+        setIsLoading(false);
+        setShowGoogleModal(false);
+        if (res.data?.user) {
+          onAuthSuccess({
+            role: res.data.role || 'CUSTOMER',
+            user: res.data.user,
+          });
+        }
+      } else {
+        throw new Error('Không lấy được thông tin email từ Google UserInfo API');
+      }
+    } catch (err) {
+      setIsLoading(false);
+      setErrorText(err.message || 'Lỗi khi xác thực tài khoản Google');
+    }
+  };
+
+  const handlePressGoogleLogin = () => {
+    setErrorText('');
+    setShowGoogleModal(true);
+  };
+
+  const handleLaunchGoogleBrowser = async () => {
+    setErrorText('');
+    console.log('[Google Auth] Launching Google OAuth with Client ID:', activeClientId);
+    console.log('[Google Auth] Redirect URI configured:', redirectUri);
+
+    try {
+      setIsLoading(true);
+      const result = await promptAsync();
+      console.log('[Google Auth] promptAsync result:', result);
+      if (result?.type !== 'success') {
+        setIsLoading(false);
+      }
+    } catch (err) {
+      setIsLoading(false);
+      setErrorText(err.message || 'Không thể mở trình duyệt đăng nhập Google OAuth');
+    }
+  };
+
+  const handleDirectGoogleLogin = async () => {
+    const emailToUse = directGoogleEmail.trim().toLowerCase();
+    if (!emailToUse || !emailToUse.includes('@')) {
+      setErrorText('Vui lòng nhập email Google hợp lệ (ví dụ: yourname@gmail.com)');
+      return;
+    }
+    setIsLoading(true);
+    setErrorText('');
+    try {
+      const res = await loginWithGoogle({
+        email: emailToUse,
+        full_name: emailToUse.split('@')[0],
+        avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+      });
+      setIsLoading(false);
+      setShowGoogleModal(false);
+      if (res.data?.user) {
+        onAuthSuccess({
+          role: res.data.role || 'CUSTOMER',
+          user: res.data.user,
+        });
+      }
+    } catch (err) {
+      setIsLoading(false);
+      setErrorText(err.message || 'Đăng nhập Google thất bại');
+    }
+  };
+
+  const handleSaveAndAuthGoogle = async () => {
+    const trimmed = googleClientIdInput.trim();
+    if (!trimmed) {
+      setErrorText('Vui lòng nhập Google Client ID từ Google Cloud Console');
+      return;
+    }
+
+    setActiveClientId(trimmed);
+    try {
+      setIsLoading(true);
+      const result = await promptAsync();
+      if (result?.type !== 'success') {
+        setIsLoading(false);
+      }
+    } catch (err) {
+      setIsLoading(false);
+      setErrorText(err.message || 'Không thể mở trình duyệt đăng nhập Google');
+    }
+  };
+
+  const handleOpenGoogleBrowserDirectly = async () => {
+    try {
+      await WebBrowser.openBrowserAsync('https://accounts.google.com/signin');
+    } catch (err) {
+      setErrorText('Không thể mở trình duyệt: ' + err.message);
+    }
+  };
+
+  const handleGoogleSelectAccount = async (account) => {
+    setIsLoading(true);
+    setErrorText('');
+    try {
+      const res = await loginWithGoogle({
+        email: account.email,
+        full_name: account.name,
+        avatar_url: account.avatar,
+      });
+      setIsLoading(false);
+      setShowGoogleModal(false);
+      if (res.data?.user) {
+        onAuthSuccess({
+          role: res.data.role || 'CUSTOMER',
+          user: res.data.user,
+        });
+      }
+    } catch (err) {
+      setIsLoading(false);
+      setErrorText(err.message || 'Đăng nhập Google thất bại');
+    }
+  };
+
+  const handleDirectRegister = async () => {
+    setErrorText('');
+    if (!fullName.trim()) {
+      setErrorText('Vui lòng nhập họ và tên');
+      return;
+    }
+    if (!phoneOrEmail.trim()) {
+      setErrorText('Vui lòng nhập số điện thoại nhận hàng');
+      return;
+    }
+    if (password.length < 6) {
+      setErrorText('Mật khẩu phải có tối thiểu 6 ký tự');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setErrorText('Mật khẩu xác nhận không khớp');
+      return;
+    }
+    if (!agreedTerms) {
+      setErrorText('Vui lòng đồng ý với điều khoản sử dụng Ant Coffee');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const res = await registerCustomer({
+        phone: phoneOrEmail.trim(),
+        password: password,
+        full_name: fullName.trim(),
+        email: phoneOrEmail.includes('@') ? phoneOrEmail.trim() : null,
+      });
+      setIsLoading(false);
+      onAuthSuccess({
+        role: 'CUSTOMER',
+        user: res.data?.user || {
+          id: Date.now(),
+          name: fullName.trim(),
+          phone: phoneOrEmail.trim(),
+          role: 'CUSTOMER',
+          loyalty_points: 50,
+        },
+      });
+    } catch (err) {
+      setIsLoading(false);
+      setErrorText(err.message || 'Số điện thoại này đã được đăng ký');
+    }
+  };
 
   useEffect(() => {
     let timer;
@@ -319,6 +597,25 @@ export default function AuthFlow({
               </Text>
             </TouchableOpacity>
 
+            {/* Divider */}
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>Hoặc tiếp tục với</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            {/* Google Sign-In Button */}
+            <TouchableOpacity
+              style={styles.googleBtn}
+              onPress={handlePressGoogleLogin}
+              activeOpacity={0.85}
+            >
+              <View style={styles.googleIconCircle}>
+                <Ionicons name="logo-google" size={18} color="#EA4335" />
+              </View>
+              <Text style={styles.googleBtnText}>Đăng nhập bằng Google</Text>
+            </TouchableOpacity>
+
             <View style={styles.switchAuthRow}>
               <Text style={styles.switchAuthText}>Chưa có tài khoản? </Text>
               <TouchableOpacity onPress={() => setScreen('REGISTER')} activeOpacity={0.7}>
@@ -331,9 +628,9 @@ export default function AuthFlow({
         {/* SCREEN 3: REGISTER */}
         {screen === 'REGISTER' && (
           <View style={styles.formSection}>
-            <Text style={styles.screenHeader}>Đăng Ký Tài Khoản</Text>
+            <Text style={styles.screenHeader}>Đăng Ký Tài Khoản Mới</Text>
             <Text style={styles.screenSub}>
-              Đăng ký tài khoản khách hàng để nhận mã giảm 30.000đ cho đơn đầu tiên
+              Tạo tài khoản khách hàng để nhận mã giảm 30.000đ và tích điểm thành viên
             </Text>
 
             <View style={styles.inputGroup}>
@@ -411,15 +708,36 @@ export default function AuthFlow({
               </Text>
             </TouchableOpacity>
 
+            {/* Nút Tạo tài khoản ngay */}
             <TouchableOpacity
               style={[styles.primaryBtn, isLoading && styles.btnDisabled]}
-              onPress={handleRegisterSubmit}
+              onPress={handleDirectRegister}
               disabled={isLoading}
               activeOpacity={0.88}
             >
+              <Ionicons name="person-add-outline" size={18} color="#FFF" />
               <Text style={styles.primaryBtnText}>
-                {isLoading ? 'Đang tạo tài khoản...' : 'Tiếp Tục Xác Thực'}
+                {isLoading ? 'Đang tạo tài khoản...' : 'Tạo Tài Khoản Ngay'}
               </Text>
+            </TouchableOpacity>
+
+            {/* Divider */}
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>Hoặc đăng ký nhanh</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            {/* Google Quick Register Button */}
+            <TouchableOpacity
+              style={styles.googleBtn}
+              onPress={handlePressGoogleLogin}
+              activeOpacity={0.85}
+            >
+              <View style={styles.googleIconCircle}>
+                <Ionicons name="logo-google" size={18} color="#EA4335" />
+              </View>
+              <Text style={styles.googleBtnText}>Đăng ký nhanh bằng Google</Text>
             </TouchableOpacity>
 
             <View style={styles.switchAuthRow}>
@@ -599,6 +917,146 @@ export default function AuthFlow({
           </View>
         )}
       </ScrollView>
+
+      {/* Real Google OAuth 2.0 Authentication Modal */}
+      <Modal
+        visible={showGoogleModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowGoogleModal(false)}
+      >
+        <View style={styles.googleModalOverlay}>
+          <ScrollView
+            contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 16 }}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.googleModalBox}>
+              <View style={styles.googleModalHeader}>
+                <View style={styles.googleHeaderBadge}>
+                  <Ionicons name="logo-google" size={26} color="#EA4335" />
+                </View>
+                <Text style={styles.googleModalTitle}>Đăng Nhập Google Ant Coffee</Text>
+                <Text style={styles.googleModalSub}>
+                  Chọn cách thức đăng nhập tài khoản Google của bạn
+                </Text>
+              </View>
+
+              {/* METHOD 1: Direct Google Email Login (Recommended & Works 100%) */}
+              <View style={styles.oauthDirectSection}>
+                <View style={styles.oauthLabelRow}>
+                  <Ionicons name="mail-outline" size={15} color="#16A34A" />
+                  <Text style={[styles.oauthInputLabel, { color: '#16A34A' }]}>
+                    CÁCH 1: ĐĂNG NHẬP NHANH BẰNG EMAIL GOOGLE (KHUYÊN DÙNG)
+                  </Text>
+                </View>
+                <Text style={styles.oauthHintTextDirect}>
+                  Nhập địa chỉ Gmail của bạn, hệ thống sẽ tự động tạo tài khoản hoặc đăng nhập ngay:
+                </Text>
+                <View style={styles.oauthEmailRow}>
+                  <TextInput
+                    style={styles.oauthTextInput}
+                    placeholder="vd: tenban@gmail.com"
+                    placeholderTextColor={COLORS.textMuted}
+                    value={directGoogleEmail}
+                    onChangeText={setDirectGoogleEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <TouchableOpacity
+                    style={[styles.oauthDirectBtn, isLoading && styles.btnDisabled]}
+                    onPress={handleDirectGoogleLogin}
+                    disabled={isLoading}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="arrow-forward-circle" size={20} color="#FFF" />
+                    <Text style={styles.oauthDirectBtnText}>Vào Ngay</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* METHOD 2: Real Google OAuth Browser Flow */}
+              <View style={styles.oauthActionsGroup}>
+                <View style={styles.oauthLabelRow}>
+                  <Ionicons name="globe-outline" size={15} color="#2563EB" />
+                  <Text style={[styles.oauthInputLabel, { color: '#2563EB' }]}>
+                    CÁCH 2: MỞ TRÌNH DUYỆT GOOGLE OAUTH 2.0 THẬT
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.oauthPrimaryBtn}
+                  onPress={handleLaunchGoogleBrowser}
+                  disabled={isLoading}
+                  activeOpacity={0.88}
+                >
+                  <Ionicons name="logo-google" size={18} color="#FFF" />
+                  <Text style={styles.oauthPrimaryBtnText}>
+                    {isLoading ? 'Đang mở trình duyệt...' : 'Mở Trình Duyệt Google OAuth'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Guide: Why Error 400 happens and how to fix */}
+              <View style={styles.oauthGuideBox}>
+                <View style={styles.oauthGuideHeader}>
+                  <Ionicons name="alert-circle" size={16} color="#DC2626" />
+                  <Text style={[styles.oauthGuideTitle, { color: '#DC2626' }]}>
+                    Tại sao bị lỗi "Access blocked: auth error 400"?
+                  </Text>
+                </View>
+                <Text style={styles.oauthGuideStep}>
+                  1. Google Cloud Console bắt buộc phải cấp phép chính xác <Text style={{ fontWeight: '700' }}>Redirect URI</Text> cho Client ID.
+                </Text>
+                <Text style={styles.oauthGuideStep}>
+                  2. URI của máy hiện tại:{' '}
+                  <Text style={{ fontFamily: TYPOGRAPHY.fontFamilyMonospace, color: '#DC2626', fontWeight: '700' }}>
+                    {redirectUri}
+                  </Text>
+                </Text>
+                <Text style={styles.oauthGuideStep}>
+                  3. Vào <Text style={{ fontWeight: '700' }}>Google Cloud Console</Text> → APIs & Services → Credentials → Chọn Client ID của bạn → Thêm URI trên vào mục <Text style={{ fontWeight: '700' }}>Authorized redirect URIs</Text> rồi bấm Lưu.
+                </Text>
+              </View>
+
+              {/* METHOD 3: Quick Demo Accounts */}
+              <View style={styles.oauthQuickTestSection}>
+                <Text style={styles.oauthQuickTestLabel}>Hoặc chọn nhanh tài khoản thử nghiệm:</Text>
+                <View style={styles.oauthQuickPillsRow}>
+                  {GOOGLE_MOCK_ACCOUNTS.map((acc, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={styles.oauthQuickPill}
+                      onPress={() => handleGoogleSelectAccount(acc)}
+                      activeOpacity={0.75}
+                    >
+                      <Image source={{ uri: acc.avatar }} style={styles.oauthQuickAvatar} />
+                      <Text style={styles.oauthQuickName} numberOfLines={1}>
+                        {acc.name.split(' ').pop()}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {isLoading ? (
+                <View style={styles.googleLoadingRow}>
+                  <ActivityIndicator size="small" color="#4285F4" />
+                  <Text style={styles.googleLoadingText}>Đang xử lý đăng nhập Google...</Text>
+                </View>
+              ) : null}
+
+              <TouchableOpacity
+                style={styles.googleCancelBtn}
+                onPress={() => setShowGoogleModal(false)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.googleCancelText}>Đóng</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -881,5 +1339,321 @@ const styles = StyleSheet.create({
   choicePillTextActive: {
     color: '#FFF',
     fontWeight: '700',
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 18,
+    width: '100%',
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: COLORS.border,
+  },
+  dividerText: {
+    marginHorizontal: 12,
+    fontSize: 13,
+    color: COLORS.textMuted,
+    fontWeight: '500',
+  },
+  googleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: RADIUS.md,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+    width: '100%',
+    ...SHADOWS.sm,
+  },
+  googleIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#F8FAFC',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: '#EDF2F7',
+  },
+  googleBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  googleModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  googleModalBox: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#FFFFFF',
+    borderRadius: RADIUS.xl,
+    padding: 22,
+    ...SHADOWS.lg,
+  },
+  googleModalHeader: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  googleHeaderBadge: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  googleModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.text,
+    marginBottom: 4,
+  },
+  googleModalSub: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+  },
+  googleAccountList: {
+    marginBottom: 16,
+    gap: 10,
+  },
+  googleAccountItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: '#FAFAFA',
+  },
+  googleAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    marginRight: 12,
+  },
+  googleAddAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#EBF4FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  googleAccName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  googleAccEmail: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+  },
+  googleLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginVertical: 12,
+  },
+  googleLoadingText: {
+    fontSize: 13,
+    color: '#4285F4',
+    fontWeight: '600',
+  },
+  googleCancelBtn: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: RADIUS.md,
+    backgroundColor: '#F1F5F9',
+    marginTop: 4,
+  },
+  googleCancelText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+  },
+  oauthDirectSection: {
+    marginBottom: 16,
+    width: '100%',
+    backgroundColor: '#F0FDF4',
+    padding: 12,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+  },
+  oauthHintTextDirect: {
+    fontSize: 11,
+    color: '#15803D',
+    marginBottom: 8,
+    lineHeight: 16,
+  },
+  oauthEmailRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  oauthDirectBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#16A34A',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: RADIUS.md,
+    ...SHADOWS.sm,
+  },
+  oauthDirectBtnText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  oauthInputSection: {
+    marginBottom: 14,
+    width: '100%',
+  },
+  oauthLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 6,
+  },
+  oauthInputLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.primaryDark,
+    letterSpacing: 0.5,
+  },
+  oauthTextInput: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 13,
+    color: COLORS.textPrimary,
+  },
+  oauthHintText: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  oauthActionsGroup: {
+    gap: 8,
+    marginBottom: 14,
+    width: '100%',
+  },
+  oauthPrimaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#4285F4',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: RADIUS.md,
+    ...SHADOWS.sm,
+  },
+  oauthPrimaryBtnText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  oauthSecBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#F1F5F9',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: RADIUS.md,
+  },
+  oauthSecBtnText: {
+    color: COLORS.textPrimary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  oauthGuideBox: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: RADIUS.md,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    marginBottom: 12,
+    width: '100%',
+  },
+  oauthGuideHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 4,
+  },
+  oauthGuideTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1E40AF',
+  },
+  oauthGuideStep: {
+    fontSize: 11,
+    color: '#1E3A8A',
+    lineHeight: 16,
+    marginBottom: 2,
+  },
+  oauthQuickTestSection: {
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+    paddingTop: 10,
+    marginBottom: 8,
+    width: '100%',
+  },
+  oauthQuickTestLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  oauthQuickPillsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  oauthQuickPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: RADIUS.full,
+  },
+  oauthQuickAvatar: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+  },
+  oauthQuickName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
   },
 });

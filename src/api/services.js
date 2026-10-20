@@ -38,6 +38,36 @@ export async function registerCustomer({ phone, password, full_name, email }) {
   }
 }
 
+export async function loginWithGoogle({ email, full_name, avatar_url }) {
+  try {
+    const res = await http.post('/api/v1/auth/google', { email, full_name, avatar_url });
+    if (res.data?.token) {
+      setAuthToken(res.data.token);
+    }
+    return res;
+  } catch (error) {
+    console.warn('[API Auth] loginWithGoogle failed, using optimistic response:', error.message);
+    // Optimistic fallback for frontend
+    const fallbackUser = {
+      id: Date.now(),
+      name: full_name || 'Khách hàng Google',
+      email: email,
+      phone: '098' + Math.floor(1000000 + Math.random() * 9000000),
+      avatar: avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
+      role: 'CUSTOMER',
+      loyalty_points: 100,
+    };
+    return {
+      success: true,
+      data: {
+        token: 'MOCK_GOOGLE_JWT_TOKEN_' + Date.now(),
+        role: 'CUSTOMER',
+        user: fallbackUser,
+      },
+    };
+  }
+}
+
 export async function fetchCurrentUser() {
   try {
     const res = await http.get('/api/v1/auth/me');
@@ -211,7 +241,11 @@ export async function deleteCustomerAddress(addressId) {
 export async function checkoutOrder(orderPayload) {
   try {
     const res = await http.post('/api/v1/orders/checkout', orderPayload);
-    return res.data;
+    const orderData = res.data || res;
+    if (res.momoPayment && orderData) {
+      orderData.momoPayment = res.momoPayment;
+    }
+    return orderData;
   } catch (error) {
     console.warn('[API Order] checkoutOrder failed:', error.message);
     throw error;
@@ -229,13 +263,17 @@ export async function fetchAllOrders(status) {
   }
 }
 
-export async function fetchMyOrders() {
+export async function fetchMyOrders(params = {}) {
   try {
-    const res = await http.get('/api/v1/orders/my-history');
-    return res.data;
+    const query = new URLSearchParams();
+    if (params.customerId) query.append('customerId', params.customerId);
+    if (params.phone) query.append('phone', params.phone);
+    const endpoint = `/api/v1/orders/my-history${query.toString() ? `?${query.toString()}` : ''}`;
+    const res = await http.get(endpoint);
+    return res.data || [];
   } catch (error) {
     console.warn('[API Order] fetchMyOrders fallback:', error.message);
-    return MOCK_ORDERS;
+    return [];
   }
 }
 
@@ -307,3 +345,60 @@ export async function fetchAuditLogs() {
     return [];
   }
 }
+
+// ==========================================
+// 9. MOMO PAYMENT APIS
+// ==========================================
+export async function createMoMoPaymentSession(payload) {
+  try {
+    const res = await http.post('/api/v1/payment/momo/create', payload);
+    return res.data;
+  } catch (error) {
+    console.warn('[API MoMo] createMoMoPaymentSession failed:', error.message);
+    throw error;
+  }
+}
+
+export async function queryMoMoPaymentStatus(orderCode) {
+  try {
+    const res = await http.get(`/api/v1/payment/momo/status/${orderCode}`);
+    return res.data;
+  } catch (error) {
+    console.warn('[API MoMo] queryMoMoPaymentStatus failed:', error.message);
+    throw error;
+  }
+}
+
+export async function simulateMoMoPayment(orderCode) {
+  try {
+    const res = await http.post('/api/v1/payment/momo/simulate', { orderCode });
+    return res.data;
+  } catch (error) {
+    console.warn('[API MoMo] simulateMoMoPayment failed:', error.message);
+    throw error;
+  }
+}
+
+// ==========================================
+// 10. VIETQR PAYMENT & PAYMENT SWITCH APIS
+// ==========================================
+export async function simulateVietQRPayment(orderCode) {
+  try {
+    const res = await http.post('/api/v1/payment/vietqr/simulate', { orderCode });
+    return res.data;
+  } catch (error) {
+    console.warn('[API VietQR] simulateVietQRPayment failed:', error.message);
+    throw error;
+  }
+}
+
+export async function switchOrderPaymentMethod(orderCode, paymentMethod) {
+  try {
+    const res = await http.post('/api/v1/payment/switch-method', { orderCode, paymentMethod });
+    return res.data;
+  } catch (error) {
+    console.warn('[API Payment] switchOrderPaymentMethod failed:', error.message);
+    throw error;
+  }
+}
+

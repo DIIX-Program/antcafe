@@ -11,7 +11,10 @@ import { Platform } from 'react-native';
  *   via EXPO_PUBLIC_API_URL or runtime override.
  */
 
-// LAN IP of developer machine
+// Cloud Backend Domain (Active & Online with Microsoft SQL Server)
+const CLOUD_API_URL = 'https://beantcafe.lingprep.cloud';
+
+// LAN IP of developer machine (Fallback for local offline development)
 const LAN_IP = '192.168.0.102';
 const PORT = 5000;
 
@@ -21,13 +24,17 @@ function getDefaultApiUrl() {
     return process.env.EXPO_PUBLIC_API_URL.replace(/\/$/, '');
   }
 
-  // 2. Browser / Web platform
+  // 2. Production Cloud Domain (Active & Online for both Mobile and Web)
+  if (CLOUD_API_URL) {
+    return CLOUD_API_URL.replace(/\/$/, '');
+  }
+
+  // 3. Browser / Web platform local fallback
   if (Platform.OS === 'web') {
     return `http://localhost:${PORT}`;
   }
 
-  // 3. Android Emulator vs Physical Mobile on LAN
-  // If running on Android emulator, 10.0.2.2 maps to host PC localhost
+  // 4. Android Emulator vs Physical Mobile on LAN
   return `http://${LAN_IP}:${PORT}`;
 }
 

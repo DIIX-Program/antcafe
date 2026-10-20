@@ -18,7 +18,7 @@ import { fetchOptionGroups } from '../api/services';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-function ProductDetailModalContent({ product, onClose, onAddToCart }) {
+function ProductDetailModalContent({ product, onClose, onAddToCart, isAcceptingOrders = true }) {
   const [optionGroups, setOptionGroups] = useState(DEFAULT_OPTION_GROUPS);
   const [selectedSize, setSelectedSize] = useState(DEFAULT_OPTION_GROUPS.sizes[0]);
   const [selectedIce, setSelectedIce] = useState(DEFAULT_OPTION_GROUPS.iceLevels[0]);
@@ -89,6 +89,7 @@ function ProductDetailModalContent({ product, onClose, onAddToCart }) {
   const originalTotalPrice = originalUnitPrice * quantity;
 
   const handleAdd = () => {
+    if (!isAcceptingOrders) return;
     onAddToCart({
       product,
       selectedSize,
@@ -172,6 +173,19 @@ function ProductDetailModalContent({ product, onClose, onAddToCart }) {
                 )}
               </View>
             </View>
+
+            {/* Store Paused Banner if not accepting orders */}
+            {!isAcceptingOrders && (
+              <View style={styles.pausedAlertBox}>
+                <Ionicons name="pause-circle" size={20} color="#DC2626" />
+                <View style={{ flex: 1, marginLeft: 8 }}>
+                  <Text style={styles.pausedAlertTitle}>Quán đang tạm ngưng nhận đơn</Text>
+                  <Text style={styles.pausedAlertSub}>
+                    Cửa hàng đang tạm nghỉ hoặc quá tải đơn. Bạn vẫn có thể tùy biến đồ uống trước nhé!
+                  </Text>
+                </View>
+              </View>
+            )}
 
             {/* QUICK CHOICES - Inspired by Talabat 'Try these quick choices' */}
             <View style={styles.quickChoicesSection}>
@@ -420,22 +434,30 @@ function ProductDetailModalContent({ product, onClose, onAddToCart }) {
 
             {/* Prominent Orange CTA Button */}
             <TouchableOpacity
-              style={styles.addCartBtn}
+              style={[
+                styles.addCartBtn,
+                !isAcceptingOrders && styles.addCartBtnDisabled,
+              ]}
               onPress={handleAdd}
+              disabled={!isAcceptingOrders}
               activeOpacity={0.88}
             >
               <View style={styles.addCartBtnContent}>
-                <Text style={styles.addCartBtnText}>Thêm vào giỏ</Text>
-                <View style={styles.priceContainer}>
-                  {product.original_price && (
-                    <Text style={styles.strikethroughPrice}>
-                      {originalTotalPrice.toLocaleString('vi-VN')}đ
+                <Text style={styles.addCartBtnText}>
+                  {isAcceptingOrders ? 'Thêm vào giỏ' : 'Quán tạm ngưng nhận đơn'}
+                </Text>
+                {isAcceptingOrders && (
+                  <View style={styles.priceContainer}>
+                    {product.original_price && (
+                      <Text style={styles.strikethroughPrice}>
+                        {originalTotalPrice.toLocaleString('vi-VN')}đ
+                      </Text>
+                    )}
+                    <Text style={styles.addCartPriceText}>
+                      {totalPrice.toLocaleString('vi-VN')}đ
                     </Text>
-                  )}
-                  <Text style={styles.addCartPriceText}>
-                    {totalPrice.toLocaleString('vi-VN')}đ
-                  </Text>
-                </View>
+                  </View>
+                )}
               </View>
             </TouchableOpacity>
           </View>
@@ -445,7 +467,7 @@ function ProductDetailModalContent({ product, onClose, onAddToCart }) {
   );
 }
 
-export default function ProductDetailModal({ visible, product, onClose, onAddToCart }) {
+export default function ProductDetailModal({ visible, product, onClose, onAddToCart, isAcceptingOrders = true }) {
   if (!visible || !product) {
     return null;
   }
@@ -455,6 +477,7 @@ export default function ProductDetailModal({ visible, product, onClose, onAddToC
       product={product}
       onClose={onClose}
       onAddToCart={onAddToCart}
+      isAcceptingOrders={isAcceptingOrders}
     />
   );
 }
@@ -844,5 +867,31 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     fontFamily: TYPOGRAPHY.fontFamilyMonospace,
+  },
+  pausedAlertBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: RADIUS.md,
+    padding: 12,
+    marginHorizontal: 16,
+    marginBottom: 16,
+  },
+  pausedAlertTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#991B1B',
+  },
+  pausedAlertSub: {
+    fontSize: 12,
+    color: '#B91C1C',
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  addCartBtnDisabled: {
+    backgroundColor: '#94A3B8',
+    opacity: 0.85,
   },
 });

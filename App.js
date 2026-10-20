@@ -41,6 +41,7 @@ import {
   initSocketClient,
   subscribeOrderCreated,
   subscribeOrderStatusUpdated,
+  subscribeOrderPaymentUpdated,
   subscribeStoreStatusUpdated,
   subscribeProductAvailabilityUpdated,
 } from './src/services/socket';
@@ -51,6 +52,8 @@ import ProductDetailModal from './src/components/ProductDetailModal';
 import CartModal from './src/components/CartModal';
 import OrderTrackingModal from './src/components/OrderTrackingModal';
 import OrderSuccessModal from './src/components/OrderSuccessModal';
+import MoMoPaymentModal from './src/components/MoMoPaymentModal';
+import VietQRPaymentModal from './src/components/VietQRPaymentModal';
 import LoginModal from './src/components/LoginModal';
 import AddressModal from './src/components/AddressModal';
 import StaffView from './src/components/StaffView';
@@ -91,6 +94,10 @@ export default function App() {
   const [isOrderTrackingVisible, setIsOrderTrackingVisible] = useState(false);
   const [isSuccessModalVisible, setIsSuccessModalVisible] = useState(false);
   const [latestCreatedOrder, setLatestCreatedOrder] = useState(null);
+  const [isMoMoModalVisible, setIsMoMoModalVisible] = useState(false);
+  const [activeMoMoOrder, setActiveMoMoOrder] = useState(null);
+  const [isVietQRModalVisible, setIsVietQRModalVisible] = useState(false);
+  const [activeVietQROrder, setActiveVietQROrder] = useState(null);
   const [isLoginModalVisible, setIsLoginModalVisible] = useState(false);
   const [isAccountModalVisible, setIsAccountModalVisible] = useState(false);
   const [isAddressModalVisible, setIsAddressModalVisible] = useState(false);
@@ -139,10 +146,36 @@ export default function App() {
       );
     });
 
+    // Subscribe to real-time payment status updates (e.g. MoMo payment confirmed via IPN)
+    const unsubPaymentUpdated = subscribeOrderPaymentUpdated((paidOrder) => {
+      const targetCode = paidOrder.order_code || paidOrder.orderCode;
+      console.log('[App] Received order:payment_updated for #', targetCode, paidOrder.payment_status);
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === paidOrder.id || (o.orderCode || o.order_code) === targetCode
+            ? { ...o, payment_status: paidOrder.payment_status, payment_transaction_ref: paidOrder.payment_transaction_ref }
+            : o
+        )
+      );
+      setLatestCreatedOrder((prev) => {
+        if (!prev) return prev;
+        const prevCode = prev.orderCode || prev.order_code;
+        if (prev.id === paidOrder.id || prevCode === targetCode) {
+          return { ...prev, payment_status: paidOrder.payment_status, payment_transaction_ref: paidOrder.payment_transaction_ref };
+        }
+        return prev;
+      });
+    });
+
     // Subscribe to store online order status changes
     const unsubStore = subscribeStoreStatusUpdated((store) => {
       if (store.is_accepting_orders !== undefined) {
-        setIsAcceptingOrders(Boolean(store.is_accepting_orders));
+        const nextAccepting = Boolean(store.is_accepting_orders);
+        setIsAcceptingOrders(nextAccepting);
+        setStoreSettings((prev) => ({
+          ...prev,
+          is_accepting_orders: nextAccepting,
+        }));
       }
     });
 
@@ -188,10 +221,72 @@ export default function App() {
     return () => {
       unsubOrderCreated();
       unsubOrderStatus();
+      unsubPaymentUpdated();
       unsubStore();
       unsubProduct();
     };
   }, []);
+
+  // Cart Deduplication & Aggregation Helper
+  const isSameCartItem = (itemA, itemB) => {
+    if (!itemA || !itemB) return false;
+    if (!itemA.product || !itemB.product) return false;
+    if (itemA.product.id !== itemB.product.id) return false;
+
+    // Compare Size
+    const sizeA = (itemA.selectedSize?.name || itemA.selectedSize?.id || '').toString();
+    const sizeB = (itemB.selectedSize?.name || itemB.selectedSize?.id || '').toString();
+    if (sizeA !== sizeB) return false;
+
+    // Compare Ice
+    const iceA = (itemA.selectedIce?.name || itemA.selectedIce?.id || '').toString();
+    const iceB = (itemB.selectedIce?.name || itemB.selectedIce?.id || '').toString();
+    if (iceA !== iceB) return false;
+
+    // Compare Sugar
+    const sugarA = (itemA.selectedSugar?.name || itemA.selectedSugar?.id || '').toString();
+    const sugarB = (itemB.selectedSugar?.name || itemB.selectedSugar?.id || '').toString();
+    if (sugarA !== sugarB) return false;
+
+    // Compare Toppings
+    const toppingsA = (itemA.selectedToppings || [])
+      .map((t) => (t.id || t.name || '').toString())
+      .sort()
+      .join('|');
+    const toppingsB = (itemB.selectedToppings || [])
+      .map((t) => (t.id || t.name || '').toString())
+      .sort()
+      .join('|');
+    if (toppingsA !== toppingsB) return false;
+
+    // Compare Notes
+    const noteA = (itemA.note || '').trim().toLowerCase();
+    const noteB = (itemB.note || '').trim().toLowerCase();
+    if (noteA !== noteB) return false;
+
+    return true;
+  };
+
+  const addItemToCartList = (cartList, newItem) => {
+    const matchIndex = cartList.findIndex((item) => isSameCartItem(item, newItem));
+    if (matchIndex >= 0) {
+      const updated = [...cartList];
+      const existing = updated[matchIndex];
+      const addQty = Number(newItem.quantity) || 1;
+      const newQty = (Number(existing.quantity) || 1) + addQty;
+      const singleUnitPrice =
+        Number(existing.unitPrice) ||
+        Number(existing.totalPrice) / (Number(existing.quantity) || 1);
+      updated[matchIndex] = {
+        ...existing,
+        quantity: newQty,
+        unitPrice: singleUnitPrice,
+        totalPrice: Math.round(singleUnitPrice * newQty),
+      };
+      return updated;
+    }
+    return [...cartList, newItem];
+  };
 
   // Cart Management
   const handleOpenDetail = (product) => {
@@ -200,14 +295,29 @@ export default function App() {
   };
 
   const handleAddToCart = (customizedItem) => {
-    // Yêu cầu bảo mật: Khách xem trước thoải mái, nhưng khi ấn mua/thêm vào giỏ thì buộc phải đăng nhập/đăng ký
+    // 1. Kiểm tra trạng thái quán: Nếu đang tạm ngừng nhận đơn thì không nhận
+    if (!isAcceptingOrders) {
+      if (Platform.OS === 'web') {
+        alert('Quán hiện đang tạm ngưng nhận đơn. Vui lòng quay lại sau ít phút nhé!');
+      } else {
+        Alert.alert(
+          'Thông báo',
+          'Quán hiện đang tạm ngưng nhận đơn. Vui lòng quay lại sau ít phút nhé!'
+        );
+      }
+      return;
+    }
+
+    // 2. Yêu cầu bảo mật: Khách xem trước thoải mái, nhưng khi ấn mua/thêm vào giỏ thì buộc phải đăng nhập/đăng ký
     if (!currentUser) {
       setPendingItemToAdd(customizedItem);
       setIsDetailModalVisible(false);
       setIsLoginModalVisible(true);
       return;
     }
-    setCart((prev) => [...prev, customizedItem]);
+
+    // 3. Tự động kiểm tra: Nếu cùng 1 món và cùng lựa chọn tùy biến thì tăng số lượng thay vì tạo item mới
+    setCart((prev) => addItemToCartList(prev, customizedItem));
   };
 
   const handleUpdateCartQuantity = (index, newQty) => {
@@ -232,8 +342,20 @@ export default function App() {
     setCart((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Checkout flow -> Posts to Backend API and opens ticket-style OrderSuccessModal
+  // Checkout flow -> Posts to Backend API and routes to MoMo Payment or OrderSuccessModal
   const handleCheckout = async (orderData) => {
+    if (!isAcceptingOrders) {
+      if (Platform.OS === 'web') {
+        alert('Cửa hàng hiện đang tạm ngưng nhận đơn. Quý khách vui lòng thử lại sau ít phút!');
+      } else {
+        Alert.alert(
+          'Thông báo',
+          'Cửa hàng hiện đang tạm ngưng nhận đơn. Quý khách vui lòng thử lại sau ít phút!'
+        );
+      }
+      return;
+    }
+
     const payload = {
       address: orderData.address,
       items: orderData.items,
@@ -243,25 +365,40 @@ export default function App() {
       totalAmount: orderData.totalAmount,
       voucherCode: orderData.voucher?.code,
       paymentMethod: orderData.paymentMethod,
-      customerNote: orderData.orderNote,
+      customerId: currentUser?.id,
+      currentUser: currentUser,
     };
+
+    let targetOrder = null;
 
     try {
       const created = await checkoutOrder(payload);
       if (created) {
         setOrders((prev) => [created, ...prev.filter((o) => o.id !== created.id)]);
         setLatestCreatedOrder(created);
+        targetOrder = created;
       }
     } catch (err) {
       console.warn('[Checkout Fallback to Optimistic]', err);
+      const errMsg = err.response?.data?.message || err.message || '';
+      if (errMsg.includes('tạm ngưng') || errMsg.includes('tạm dừng')) {
+        setIsAcceptingOrders(false);
+        if (Platform.OS === 'web') {
+          alert(errMsg);
+        } else {
+          Alert.alert('Thông báo', errMsg);
+        }
+        return;
+      }
       const nextSeqNum = `#${String(orders.length + 1).padStart(3, '0')}`;
       const fallbackOrder = {
         id: Date.now(),
         orderCode: `ANT-${Math.floor(1000 + Math.random() * 9000)}`,
         sequence_number: nextSeqNum,
         status: 'PENDING',
-        customer_name: orderData.address?.recipient_name || currentUser.name || 'Khách hàng',
-        phone: orderData.address?.phone || currentUser.phone || '0901 234 567',
+        customer_id: currentUser?.id || 3,
+        customer_name: orderData.address?.recipient_name || currentUser?.name || 'Khách hàng',
+        phone: orderData.address?.phone || currentUser?.phone || '0901 234 567',
         address: orderData.address?.address_detail || '123 Nguyễn Huệ, P. Bến Nghé, Q.1',
         created_at: 'Vừa xong',
         estimated_delivery: '15 - 25 phút',
@@ -279,7 +416,7 @@ export default function App() {
           }`,
         })),
         total_amount: orderData.totalAmount,
-        payment_status: orderData.paymentMethod === 'CASH' ? 'UNPAID' : 'PAID',
+        payment_status: 'UNPAID',
         payment_method:
           orderData.paymentMethod === 'MOMO'
             ? 'Ví MoMo'
@@ -290,11 +427,109 @@ export default function App() {
       };
       setOrders((prev) => [fallbackOrder, ...prev]);
       setLatestCreatedOrder(fallbackOrder);
+      targetOrder = fallbackOrder;
     }
 
     setCart([]);
     setIsCartModalVisible(false);
-    setIsSuccessModalVisible(true);
+
+    // Điều hướng phương thức thanh toán:
+    // 1. MoMo -> Mở MoMo Payment Sheet
+    if (orderData.paymentMethod === 'MOMO') {
+      setActiveMoMoOrder(targetOrder);
+      setIsMoMoModalVisible(true);
+    } 
+    // 2. Chuyển khoản VietQR -> Mở VietQR Payment Modal
+    else if (orderData.paymentMethod === 'BANK' || orderData.paymentMethod === 'VietQR') {
+      setActiveVietQROrder(targetOrder);
+      setIsVietQRModalVisible(true);
+    } 
+    // 3. Tiền mặt (COD) -> Đặt hàng thành công ngay lập tức!
+    else {
+      setIsSuccessModalVisible(true);
+    }
+  };
+
+  const handleMoMoPaymentSuccess = (paidOrder) => {
+    if (paidOrder) {
+      const code = paidOrder.order_code || paidOrder.orderCode;
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === paidOrder.id || (o.orderCode || o.order_code) === code
+            ? { ...o, payment_status: 'PAID', payment_method: 'Ví MoMo', payment_transaction_ref: paidOrder.payment_transaction_ref }
+            : o
+        )
+      );
+      setLatestCreatedOrder((prev) =>
+        prev ? { ...prev, payment_status: 'PAID', payment_method: 'Ví MoMo', payment_transaction_ref: paidOrder.payment_transaction_ref } : prev
+      );
+    }
+    setIsMoMoModalVisible(false);
+    setIsSuccessModalVisible(true); // Thanh toán xong -> Đặt hàng thành công!
+  };
+
+  const handleMoMoSwitchToCash = () => {
+    if (activeMoMoOrder) {
+      const cashOrder = {
+        ...activeMoMoOrder,
+        payment_method: 'Tiền mặt khi nhận',
+        payment_status: 'UNPAID',
+      };
+      setOrders((prev) =>
+        prev.map((o) => (o.id === cashOrder.id ? cashOrder : o))
+      );
+      setLatestCreatedOrder(cashOrder);
+    }
+    setIsMoMoModalVisible(false);
+    setIsSuccessModalVisible(true); // Chuyển sang COD -> Đặt hàng thành công!
+  };
+
+  const handleMoMoSwitchToVietQR = () => {
+    const target = activeMoMoOrder;
+    setIsMoMoModalVisible(false);
+    setActiveVietQROrder(target);
+    setIsVietQRModalVisible(true);
+  };
+
+  const handleVietQRPaymentSuccess = (paidOrder) => {
+    if (paidOrder) {
+      const code = paidOrder.order_code || paidOrder.orderCode;
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === paidOrder.id || (o.orderCode || o.order_code) === code
+            ? { ...o, payment_status: 'PAID', payment_method: 'VietQR', payment_transaction_ref: paidOrder.payment_transaction_ref }
+            : o
+        )
+      );
+      setLatestCreatedOrder((prev) =>
+        prev ? { ...prev, payment_status: 'PAID', payment_method: 'VietQR', payment_transaction_ref: paidOrder.payment_transaction_ref } : prev
+      );
+    }
+    setIsVietQRModalVisible(false);
+    setIsSuccessModalVisible(true); // Thanh toán xong -> Đặt hàng thành công!
+  };
+
+  const handleVietQRSwitchToCash = () => {
+    if (activeVietQROrder) {
+      const cashOrder = {
+        ...activeVietQROrder,
+        payment_method: 'Tiền mặt khi nhận',
+        payment_status: 'UNPAID',
+      };
+      setOrders((prev) =>
+        prev.map((o) => (o.id === cashOrder.id ? cashOrder : o))
+      );
+      setLatestCreatedOrder(cashOrder);
+    }
+    setIsVietQRModalVisible(false);
+    setIsSuccessModalVisible(true); // Chuyển sang COD -> Đặt hàng thành công!
+  };
+
+  const handleVietQRSwitchToMoMo = () => {
+    const target = activeVietQROrder;
+    setIsVietQRModalVisible(false);
+    setActiveMoMoOrder(target);
+    setIsMoMoModalVisible(true);
   };
 
   const handleCancelOrder = async (orderId) => {
@@ -370,7 +605,7 @@ export default function App() {
     if (role === 'CUSTOMER') {
       // Nếu trước đó khách đã chọn món đồ uống trước khi đăng nhập thì tự động thêm vào giỏ
       if (pendingItemToAdd) {
-        setCart((prev) => [...prev, pendingItemToAdd]);
+        setCart((prev) => addItemToCartList(prev, pendingItemToAdd));
         setPendingItemToAdd(null);
       }
       fetchCustomerAddresses().then((addrs) => {
@@ -395,6 +630,18 @@ export default function App() {
     setPendingItemToAdd(null);
     setCustomerTab('HOME');
     setIsAccountModalVisible(false);
+  };
+
+  // Quản lý trạng thái Bật / Tạm ngưng nhận đơn toàn hệ thống (Dành cho Chủ quán)
+  const handleToggleStoreAcceptingOrders = async () => {
+    try {
+      const nextStatus = !isAcceptingOrders;
+      setIsAcceptingOrders(nextStatus);
+      setStoreSettings((prev) => ({ ...prev, is_accepting_orders: nextStatus }));
+      await toggleStoreAcceptingOrders();
+    } catch (err) {
+      console.warn('Lỗi khi bật/tắt nhận đơn:', err);
+    }
   };
 
   // Bottom Navigation tab selection
@@ -476,12 +723,20 @@ export default function App() {
     });
   }, [products, selectedCategory, searchQuery, selectedFilterTag]);
 
-  // Active ongoing customer order (if any)
+  // Active ongoing customer order (if any) - CHỈ hiển thị nếu đã đăng nhập và là đơn của currentUser!
   const activeCustomerOrder = useMemo(() => {
-    return orders.find(
-      (o) => o.status === 'PENDING' || o.status === 'CONFIRMED' || o.status === 'READY'
-    );
-  }, [orders]);
+    if (!currentUser) return null;
+    return orders.find((o) => {
+      const isOngoing = o.status === 'PENDING' || o.status === 'CONFIRMED' || o.status === 'READY';
+      if (!isOngoing) return false;
+      const orderCustId = o.customer_id || o.customerId;
+      if (orderCustId && currentUser.id && String(orderCustId) === String(currentUser.id)) return true;
+      const oPhone = (o.phone || o.recipient_phone || '').replace(/\D/g, '');
+      const uPhone = (currentUser.phone || '').replace(/\D/g, '');
+      if (oPhone && uPhone && (oPhone === uPhone || uPhone.endsWith(oPhone) || oPhone.endsWith(uPhone))) return true;
+      return false;
+    });
+  }, [orders, currentUser]);
 
   const totalCartCount = cart.reduce((sum, it) => sum + it.quantity, 0);
   const pendingOrdersCount = orders.filter((o) => o.status === 'PENDING').length;
@@ -842,8 +1097,8 @@ export default function App() {
         {guardedRole === 'OWNER' && (
           <OwnerView
             isAcceptingOrders={isAcceptingOrders}
-            onToggleAcceptingOrders={() => setIsAcceptingOrders(!isAcceptingOrders)}
-            storeSettings={STORE_SETTINGS}
+            onToggleAcceptingOrders={handleToggleStoreAcceptingOrders}
+            storeSettings={storeSettings}
             products={products}
             currentTab={ownerTab}
             onSelectTab={setOwnerTab}
@@ -876,6 +1131,7 @@ export default function App() {
         <ProductDetailModal
           visible={isDetailModalVisible}
           product={detailProduct}
+          isAcceptingOrders={isAcceptingOrders}
           onClose={() => {
             setIsDetailModalVisible(false);
             setDetailProduct(null);
@@ -887,6 +1143,7 @@ export default function App() {
         <CartModal
           visible={isCartModalVisible}
           cartItems={cart}
+          isAcceptingOrders={isAcceptingOrders}
           onClose={() => setIsCartModalVisible(false)}
           onUpdateQuantity={handleUpdateCartQuantity}
           onRemoveItem={handleRemoveCartItem}
@@ -905,6 +1162,29 @@ export default function App() {
           }}
         />
 
+        {/* MoMo Payment Gateway Modal */}
+        <MoMoPaymentModal
+          visible={isMoMoModalVisible}
+          order={activeMoMoOrder}
+          momoPayment={activeMoMoOrder?.momoPayment}
+          onClose={() => {
+            setIsMoMoModalVisible(false);
+          }}
+          onPaymentSuccess={handleMoMoPaymentSuccess}
+          onSwitchToCash={handleMoMoSwitchToCash}
+          onSwitchToVietQR={handleMoMoSwitchToVietQR}
+        />
+
+        {/* VietQR Payment Modal (Chuẩn Napas 247) */}
+        <VietQRPaymentModal
+          visible={isVietQRModalVisible}
+          order={activeVietQROrder}
+          onClose={() => setIsVietQRModalVisible(false)}
+          onPaymentSuccess={handleVietQRPaymentSuccess}
+          onSwitchToCash={handleVietQRSwitchToCash}
+          onSwitchToMoMo={handleVietQRSwitchToMoMo}
+        />
+
         {/* Order Completion Screen (Flight-Ticket Style) */}
         <OrderSuccessModal
           visible={isSuccessModalVisible}
@@ -912,17 +1192,33 @@ export default function App() {
           onClose={() => setIsSuccessModalVisible(false)}
           onTrackOrder={(order) => {
             setIsSuccessModalVisible(false);
-            setIsOrderTrackingVisible(true);
+            if (!currentUser) {
+              setIsLoginModalVisible(true);
+            } else {
+              setIsOrderTrackingVisible(true);
+            }
           }}
+          onOpenMoMoPayment={(order) => {
+            setActiveMoMoOrder(order);
+            setIsMoMoModalVisible(true);
+          }}
+          onOpenVietQRPayment={(order) => {
+            setActiveVietQROrder(order);
+            setIsVietQRModalVisible(true);
+          }}
+          currentUser={currentUser}
+          onRequireLogin={() => setIsLoginModalVisible(true)}
         />
 
-        {/* Order Tracking Modal */}
+        {/* Order Tracking Modal - Chỉ người đăng nhập mới xem được đơn của mình */}
         <OrderTrackingModal
           visible={isOrderTrackingVisible}
           orders={orders}
           onClose={() => setIsOrderTrackingVisible(false)}
           onCancelOrder={handleCancelOrder}
           onReorder={handleReorder}
+          currentUser={currentUser}
+          onRequireLogin={() => setIsLoginModalVisible(true)}
         />
 
         {/* Authentication Modal */}
@@ -940,7 +1236,13 @@ export default function App() {
           currentUser={currentUser}
           onLogout={handleLogout}
           onOpenAddressModal={() => setIsAddressModalVisible(true)}
-          onOpenOrderTracking={() => setIsOrderTrackingVisible(true)}
+          onOpenOrderTracking={() => {
+            if (!currentUser) {
+              setIsLoginModalVisible(true);
+            } else {
+              setIsOrderTrackingVisible(true);
+            }
+          }}
         />
 
         {/* Address Selection Modal */}

@@ -24,6 +24,10 @@ export default function OrderSuccessModal({
   order,
   onClose,
   onTrackOrder,
+  onOpenMoMoPayment,
+  onOpenVietQRPayment,
+  currentUser,
+  onRequireLogin,
 }) {
   if (!visible || !order) return null;
 
@@ -167,11 +171,45 @@ export default function OrderSuccessModal({
 
           {/* Action Buttons */}
           <View style={styles.actionsContainer}>
+            {order.payment_method?.includes('MoMo') && order.payment_status !== 'PAID' && onOpenMoMoPayment ? (
+              <TouchableOpacity
+                style={styles.payMoMoBtn}
+                onPress={() => {
+                  onClose();
+                  onOpenMoMoPayment(order);
+                }}
+                activeOpacity={0.88}
+              >
+                <View style={styles.momoMiniBadge}>
+                  <Text style={styles.momoMiniBadgeText}>MoMo</Text>
+                </View>
+                <Text style={styles.payMoMoBtnText}>Thanh toán ngay bằng Ví MoMo</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {(order.payment_method?.includes('VietQR') || order.payment_method?.includes('BANK') || order.payment_method === 'Chuyển khoản VietQR') && order.payment_status !== 'PAID' && onOpenVietQRPayment ? (
+              <TouchableOpacity
+                style={[styles.payMoMoBtn, { backgroundColor: '#005BAA' }]}
+                onPress={() => {
+                  onClose();
+                  onOpenVietQRPayment(order);
+                }}
+                activeOpacity={0.88}
+              >
+                <Ionicons name="qr-code-outline" size={18} color="#FFF" />
+                <Text style={styles.payMoMoBtnText}>Thanh toán ngay bằng VietQR</Text>
+              </TouchableOpacity>
+            ) : null}
+
             <TouchableOpacity
               style={styles.trackOrderBtn}
               onPress={() => {
                 onClose();
-                onTrackOrder(order);
+                if (!currentUser && onRequireLogin) {
+                  onRequireLogin();
+                } else {
+                  onTrackOrder(order);
+                }
               }}
               activeOpacity={0.88}
             >
@@ -463,6 +501,32 @@ const styles = StyleSheet.create({
     width: '100%',
     gap: 8,
     marginTop: 14,
+  },
+  payMoMoBtn: {
+    minHeight: TOUCH_TARGET.minHeight,
+    backgroundColor: '#A50064',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: RADIUS.full,
+    ...SHADOWS.md,
+  },
+  payMoMoBtnText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  momoMiniBadge: {
+    backgroundColor: '#FFF',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  momoMiniBadgeText: {
+    color: '#A50064',
+    fontSize: 9,
+    fontWeight: '900',
   },
   trackOrderBtn: {
     minHeight: TOUCH_TARGET.minHeight,

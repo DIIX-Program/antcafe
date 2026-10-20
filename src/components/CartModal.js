@@ -58,6 +58,7 @@ export default function CartModal({
   shippingFee = 15000,
   currentUser = null,
   onRequireLogin,
+  isAcceptingOrders = true,
 }) {
   const [voucherList, setVoucherList] = useState(VOUCHERS);
   const [selectedVoucher, setSelectedVoucher] = useState(null);
@@ -147,6 +148,7 @@ export default function CartModal({
   };
 
   const handleQuickAddCrossSell = (item) => {
+    if (!isAcceptingOrders) return;
     if (onAddToCart) {
       onAddToCart({
         product: {
@@ -169,6 +171,7 @@ export default function CartModal({
   };
 
   const handleProceedCheckout = () => {
+    if (!isAcceptingOrders) return;
     if (cartItems.length === 0 || isSubmitting) return;
     if (!currentUser) {
       if (onRequireLogin) {
@@ -240,6 +243,21 @@ export default function CartModal({
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.scrollContent}
               >
+                {/* Store Paused Banner */}
+                {!isAcceptingOrders && (
+                  <View style={styles.storePausedBanner}>
+                    <Ionicons name="pause-circle" size={22} color="#DC2626" />
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                      <Text style={styles.storePausedBannerTitle}>
+                        Quán đang tạm ngưng nhận đơn
+                      </Text>
+                      <Text style={styles.storePausedBannerSub}>
+                        Cửa hàng đang tạm ngừng tiếp nhận đơn đặt hàng trực tuyến. Quý khách vui lòng thử lại sau ít phút nhé!
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
                 {/* Delivery Address Banner */}
                 <TouchableOpacity
                   style={styles.addressCard}
@@ -468,11 +486,11 @@ export default function CartModal({
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>Phương thức thanh toán</Text>
 
-                  {/* MoMo */}
+                  {/* MoMo E-Wallet Option */}
                   <TouchableOpacity
                     style={[
                       styles.paymentOption,
-                      paymentMethod === 'MOMO' && styles.paymentOptionActive,
+                      paymentMethod === 'MOMO' && styles.paymentOptionActiveMoMo,
                     ]}
                     onPress={() => setPaymentMethod('MOMO')}
                     activeOpacity={0.8}
@@ -481,23 +499,28 @@ export default function CartModal({
                       <View style={[styles.paymentIconBox, { backgroundColor: '#A50064' }]}>
                         <Text style={styles.momoText}>MoMo</Text>
                       </View>
-                      <View>
-                        <Text style={styles.paymentTitle}>Ví điện tử MoMo</Text>
-                        <Text style={styles.paymentSubtitle}>Thanh toán bảo mật tức thì</Text>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text style={styles.paymentTitle}>Ví điện tử MoMo</Text>
+                          <View style={styles.momoBadge}>
+                            <Text style={styles.momoBadgeText}>Khuyên dùng</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.paymentSubtitle}>Thanh toán online tức thì qua App/QR MoMo</Text>
                       </View>
                     </View>
                     <Ionicons
                       name={paymentMethod === 'MOMO' ? 'radio-button-on' : 'radio-button-off'}
                       size={20}
-                      color={paymentMethod === 'MOMO' ? COLORS.accentOrange : COLORS.textMuted}
+                      color={paymentMethod === 'MOMO' ? '#A50064' : COLORS.textMuted}
                     />
                   </TouchableOpacity>
 
-                  {/* COD */}
+                  {/* Cash on Delivery (COD) Option */}
                   <TouchableOpacity
                     style={[
                       styles.paymentOption,
-                      paymentMethod === 'CASH' && styles.paymentOptionActive,
+                      paymentMethod === 'CASH' && styles.paymentOptionActiveCash,
                     ]}
                     onPress={() => setPaymentMethod('CASH')}
                     activeOpacity={0.8}
@@ -506,19 +529,24 @@ export default function CartModal({
                       <View style={[styles.paymentIconBox, { backgroundColor: COLORS.accentGreen }]}>
                         <Ionicons name="cash-outline" size={18} color="#FFF" />
                       </View>
-                      <View>
-                        <Text style={styles.paymentTitle}>Tiền mặt (COD)</Text>
-                        <Text style={styles.paymentSubtitle}>Thanh toán khi nhận đồ uống</Text>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text style={styles.paymentTitle}>Tiền mặt khi nhận (COD)</Text>
+                          <View style={styles.cashBadge}>
+                            <Text style={styles.cashBadgeText}>Tận nơi</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.paymentSubtitle}>Thanh toán tiền mặt cho tài xế giao hàng</Text>
                       </View>
                     </View>
                     <Ionicons
                       name={paymentMethod === 'CASH' ? 'radio-button-on' : 'radio-button-off'}
                       size={20}
-                      color={paymentMethod === 'CASH' ? COLORS.accentOrange : COLORS.textMuted}
+                      color={paymentMethod === 'CASH' ? COLORS.accentGreen : COLORS.textMuted}
                     />
                   </TouchableOpacity>
 
-                  {/* VietQR */}
+                  {/* VietQR Bank Transfer Option */}
                   <TouchableOpacity
                     style={[
                       styles.paymentOption,
@@ -531,7 +559,7 @@ export default function CartModal({
                       <View style={[styles.paymentIconBox, { backgroundColor: COLORS.accentBlue }]}>
                         <Ionicons name="qr-code-outline" size={18} color="#FFF" />
                       </View>
-                      <View>
+                      <View style={{ flex: 1 }}>
                         <Text style={styles.paymentTitle}>Chuyển khoản VietQR</Text>
                         <Text style={styles.paymentSubtitle}>Quét mã QR ngân hàng tự động</Text>
                       </View>
@@ -628,16 +656,44 @@ export default function CartModal({
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={styles.checkoutBtn}
+                  style={[
+                    styles.checkoutBtn,
+                    !isAcceptingOrders
+                      ? styles.checkoutBtnDisabled
+                      : paymentMethod === 'MOMO'
+                      ? styles.checkoutBtnMoMo
+                      : paymentMethod === 'CASH'
+                      ? styles.checkoutBtnCash
+                      : styles.checkoutBtnBank,
+                  ]}
                   onPress={handleProceedCheckout}
+                  disabled={!isAcceptingOrders || isSubmitting}
                   activeOpacity={0.88}
                 >
                   <Text style={styles.checkoutBtnText}>
-                    {currentUser
-                      ? `Đặt đơn • ${finalTotal.toLocaleString('vi-VN')}đ`
-                      : `Đăng nhập để đặt đơn • ${finalTotal.toLocaleString('vi-VN')}đ`}
+                    {!isAcceptingOrders
+                      ? 'Quán đang tạm ngưng nhận đơn'
+                      : !currentUser
+                      ? `Đăng nhập để đặt đơn • ${finalTotal.toLocaleString('vi-VN')}đ`
+                      : paymentMethod === 'MOMO'
+                      ? `Thanh toán Ví MoMo • ${finalTotal.toLocaleString('vi-VN')}đ`
+                      : paymentMethod === 'CASH'
+                      ? `Đặt đơn (Tiền mặt COD) • ${finalTotal.toLocaleString('vi-VN')}đ`
+                      : `Thanh toán VietQR • ${finalTotal.toLocaleString('vi-VN')}đ`}
                   </Text>
-                  <Ionicons name="arrow-forward" size={17} color="#FFF" />
+                  <Ionicons
+                    name={
+                      !isAcceptingOrders
+                        ? 'pause-circle-outline'
+                        : paymentMethod === 'MOMO'
+                        ? 'wallet-outline'
+                        : paymentMethod === 'CASH'
+                        ? 'cash-outline'
+                        : 'arrow-forward'
+                    }
+                    size={18}
+                    color="#FFF"
+                  />
                 </TouchableOpacity>
               </View>
             </>
@@ -1095,6 +1151,36 @@ const styles = StyleSheet.create({
     borderColor: COLORS.accentOrange,
     backgroundColor: '#FFF7ED',
   },
+  paymentOptionActiveMoMo: {
+    borderColor: '#A50064',
+    backgroundColor: '#FDF2F8',
+  },
+  paymentOptionActiveCash: {
+    borderColor: COLORS.accentGreen,
+    backgroundColor: '#F0FDF4',
+  },
+  momoBadge: {
+    backgroundColor: '#FCE7F3',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: RADIUS.xs,
+  },
+  momoBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#A50064',
+  },
+  cashBadge: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: RADIUS.xs,
+  },
+  cashBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#166534',
+  },
   paymentLeft: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1231,10 +1317,44 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.full,
     ...SHADOWS.sm,
   },
+  checkoutBtnMoMo: {
+    backgroundColor: '#A50064',
+  },
+  checkoutBtnCash: {
+    backgroundColor: COLORS.accentGreen,
+  },
+  checkoutBtnBank: {
+    backgroundColor: '#005BAA',
+  },
   checkoutBtnText: {
     color: '#FFF',
     fontSize: 15,
     fontWeight: '800',
     fontFamily: TYPOGRAPHY.fontFamilyMonospace,
+  },
+  checkoutBtnDisabled: {
+    backgroundColor: '#94A3B8',
+    opacity: 0.85,
+  },
+  storePausedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: RADIUS.md,
+    padding: 14,
+    marginBottom: 14,
+  },
+  storePausedBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#991B1B',
+  },
+  storePausedBannerSub: {
+    fontSize: 12,
+    color: '#B91C1C',
+    marginTop: 2,
+    lineHeight: 16,
   },
 });

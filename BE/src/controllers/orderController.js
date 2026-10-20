@@ -1,5 +1,6 @@
 import { getDbPool, sql } from '../config/db.js';
 import { emitOrderCreated, emitOrderStatusUpdated } from '../socket/socketHandler.js';
+import { createMoMoPayment } from '../services/momoService.js';
 
 export async function createOrder(req, res) {
   try {
@@ -20,8 +21,22 @@ export async function createOrder(req, res) {
     }
 
     const pool = await getDbPool();
+
+    // Kiểm tra trạng thái của quán: Khi quán tạm ngừng thì từ chối nhận đơn
+    try {
+      const storeRes = await pool.request().query('SELECT TOP 1 is_accepting_orders FROM store_settings');
+      if (storeRes.recordset.length > 0 && storeRes.recordset[0].is_accepting_orders === false) {
+        return res.status(400).json({
+          success: false,
+          message: 'Quán hiện đang tạm ngừng nhận đơn trực tuyến. Xin lỗi quý khách vì sự bất tiện này!',
+        });
+      }
+    } catch (storeErr) {
+      console.warn('[Order] Check store status error:', storeErr.message);
+    }
+
     const today = new Date().toISOString().slice(0, 10);
-    const customerId = req.user?.id || 3;
+    const customerId = req.user?.id || req.body.customerId || req.body.currentUser?.id || 3;
 
     // 1. Generate daily queue number and order code via Stored Procedure or atomic fallback
     let queueNumber = 'A001';
@@ -68,7 +83,7 @@ export async function createOrder(req, res) {
     const shipping = Number(shippingFee) !== undefined ? Number(shippingFee) : 15000;
     const finalTotal = Number(totalAmount) || (subtotal - discount + shipping);
 
-    const paymentStatus = (paymentMethod === 'MOMO' || paymentMethod === 'BANK') ? 'PAID' : 'UNPAID';
+    const paymentStatus = 'UNPAID';
     const paymentMethodFormatted = paymentMethod === 'MOMO' ? 'MOMO' : paymentMethod === 'BANK' ? 'BANK_TRANSFER' : 'CASH';
 
     // 2. Insert into orders table
@@ -171,6 +186,20 @@ export async function createOrder(req, res) {
         .query('UPDATE vouchers SET used_count = used_count + 1 WHERE code = @vCode');
     }
 
+    // 4.1. If paymentMethod is MOMO, initiate MoMo payment session
+    let momoPayment = null;
+    if (paymentMethod === 'MOMO') {
+      try {
+        momoPayment = await createMoMoPayment({
+          orderCode,
+          amount: finalTotal,
+          orderInfo: `Thanh toán Ant Coffee cho đơn #${orderCode}`,
+        });
+      } catch (momoErr) {
+        console.error('[Order] MoMo payment session initiation error:', momoErr.message);
+      }
+    }
+
     // Construct full order object matching frontend state structure
     const completeOrder = {
       id: Number(orderId),
@@ -193,6 +222,7 @@ export async function createOrder(req, res) {
       payment_status: paymentStatus,
       payment_method: paymentMethod === 'MOMO' ? 'Ví MoMo' : paymentMethod === 'BANK' ? 'VietQR' : 'Tiền mặt khi nhận',
       driver: null,
+      momoPayment: momoPayment,
     };
 
     // 5. Broadcast real-time WebSocket event
@@ -200,8 +230,9 @@ export async function createOrder(req, res) {
 
     return res.status(201).json({
       success: true,
-      message: 'Đặt hàng thành công!',
+      message: paymentMethod === 'MOMO' ? 'Đã tạo đơn hàng & tạo liên kết MoMo thành công!' : 'Đặt hàng thành công!',
       data: completeOrder,
+      momoPayment: momoPayment,
     });
   } catch (error) {
     console.error('[Order] createOrder error:', error);
@@ -305,21 +336,40 @@ export async function getAllOrders(req, res) {
 
 export async function getMyOrders(req, res) {
   try {
-    const customerId = req.user?.id || 3;
-    const pool = await getDbPool();
+    const customerId = req.user?.id || req.query.customerId || req.query.userId;
+    const phone = req.query.phone || req.user?.phone;
 
-    const ordersRes = await pool.request()
-      .input('customerId', sql.BigInt, customerId)
-      .query(`
-        SELECT 
-          o.id, o.order_code, o.daily_queue_number, o.status, o.total_amount,
-          o.payment_method, o.payment_status, o.recipient_name, o.recipient_phone,
-          o.shipping_address, o.driver_name, o.driver_phone, o.driver_vehicle,
-          o.estimated_delivery, o.created_at
-        FROM orders o
-        WHERE o.customer_id = @customerId
-        ORDER BY o.id DESC
-      `);
+    if (!customerId && !phone) {
+      // Yêu cầu bảo mật: Chưa đăng nhập không được xem đơn hàng của ai cả
+      return res.json({
+        success: true,
+        data: [],
+      });
+    }
+
+    const pool = await getDbPool();
+    const reqDb = pool.request();
+    let query = `
+      SELECT 
+        o.id, o.order_code, o.daily_queue_number, o.status, o.total_amount,
+        o.payment_method, o.payment_status, o.recipient_name, o.recipient_phone,
+        o.shipping_address, o.driver_name, o.driver_phone, o.driver_vehicle,
+        o.estimated_delivery, o.created_at, o.customer_id
+      FROM orders o
+      WHERE 1=1
+    `;
+
+    if (customerId) {
+      query += ` AND o.customer_id = @customerId`;
+      reqDb.input('customerId', sql.BigInt, customerId);
+    } else if (phone) {
+      query += ` AND o.recipient_phone = @phone`;
+      reqDb.input('phone', sql.VarChar(15), phone);
+    }
+
+    query += ` ORDER BY o.id DESC`;
+
+    const ordersRes = await reqDb.query(query);
 
     const orderIds = ordersRes.recordset.map(o => o.id);
     let itemsMap = {};

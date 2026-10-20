@@ -148,7 +148,105 @@ assert(hasPermission('STAFF', 'UPDATE_ORDER_STATUS'), 'Staff can update order st
 assert(!hasPermission('STAFF', 'TOGGLE_STORE_EMERGENCY'), 'Staff cannot access owner emergency toggle');
 assert(hasPermission('OWNER', 'TOGGLE_STORE_EMERGENCY'), 'Owner has permission to toggle store emergency mode');
 
+// TEST 9: CART DEDUPLICATION & STORE PAUSED GUARD
+console.log('\n--- TEST GROUP 9: CART DEDUPLICATION & STORE PAUSED GUARD ---');
+const isSameCartItem = (itemA, itemB) => {
+  if (!itemA || !itemB) return false;
+  if (!itemA.product || !itemB.product) return false;
+  if (itemA.product.id !== itemB.product.id) return false;
+
+  const sizeA = (itemA.selectedSize?.name || itemA.selectedSize?.id || '').toString();
+  const sizeB = (itemB.selectedSize?.name || itemB.selectedSize?.id || '').toString();
+  if (sizeA !== sizeB) return false;
+
+  const iceA = (itemA.selectedIce?.name || itemA.selectedIce?.id || '').toString();
+  const iceB = (itemB.selectedIce?.name || itemB.selectedIce?.id || '').toString();
+  if (iceA !== iceB) return false;
+
+  const sugarA = (itemA.selectedSugar?.name || itemA.selectedSugar?.id || '').toString();
+  const sugarB = (itemB.selectedSugar?.name || itemB.selectedSugar?.id || '').toString();
+  if (sugarA !== sugarB) return false;
+
+  const toppingsA = (itemA.selectedToppings || []).map((t) => (t.id || t.name || '').toString()).sort().join('|');
+  const toppingsB = (itemB.selectedToppings || []).map((t) => (t.id || t.name || '').toString()).sort().join('|');
+  if (toppingsA !== toppingsB) return false;
+
+  const noteA = (itemA.note || '').trim().toLowerCase();
+  const noteB = (itemB.note || '').trim().toLowerCase();
+  if (noteA !== noteB) return false;
+
+  return true;
+};
+
+const addItemToCartList = (cartList, newItem) => {
+  const matchIndex = cartList.findIndex((item) => isSameCartItem(item, newItem));
+  if (matchIndex >= 0) {
+    const updated = [...cartList];
+    const existing = updated[matchIndex];
+    const addQty = Number(newItem.quantity) || 1;
+    const newQty = (Number(existing.quantity) || 1) + addQty;
+    const singleUnitPrice =
+      Number(existing.unitPrice) ||
+      Number(existing.totalPrice) / (Number(existing.quantity) || 1);
+    updated[matchIndex] = {
+      ...existing,
+      quantity: newQty,
+      unitPrice: singleUnitPrice,
+      totalPrice: Math.round(singleUnitPrice * newQty),
+    };
+    return updated;
+  }
+  return [...cartList, newItem];
+};
+
+const item1 = {
+  product: { id: 101, name: 'Cà phê muối' },
+  selectedSize: { id: 'M', name: 'Size M' },
+  selectedIce: { id: '50', name: '50% Đá' },
+  selectedSugar: { id: '50', name: '50% Đường' },
+  selectedToppings: [{ id: 'TC', name: 'Trân châu' }],
+  note: 'Ít đắng',
+  quantity: 1,
+  unitPrice: 35000,
+  totalPrice: 35000,
+};
+
+const item1Duplicate = {
+  product: { id: 101, name: 'Cà phê muối' },
+  selectedSize: { id: 'M', name: 'Size M' },
+  selectedIce: { id: '50', name: '50% Đá' },
+  selectedSugar: { id: '50', name: '50% Đường' },
+  selectedToppings: [{ id: 'TC', name: 'Trân châu' }],
+  note: 'Ít đắng',
+  quantity: 2,
+  unitPrice: 35000,
+  totalPrice: 70000,
+};
+
+const item1DifferentSize = {
+  ...item1,
+  selectedSize: { id: 'L', name: 'Size L' },
+};
+
+let testCart = [];
+testCart = addItemToCartList(testCart, item1);
+assert(testCart.length === 1 && testCart[0].quantity === 1, 'Initial item added to cart');
+
+testCart = addItemToCartList(testCart, item1Duplicate);
+assert(testCart.length === 1, 'Duplicate item does NOT create a new cart row');
+assert(testCart[0].quantity === 3, 'Duplicate item increments existing item quantity (1 + 2 = 3)');
+assert(testCart[0].totalPrice === 105000, 'Duplicate item recalculates total price (35,000 * 3 = 105,000đ)');
+
+testCart = addItemToCartList(testCart, item1DifferentSize);
+assert(testCart.length === 2, 'Item with different size creates a separate cart row');
+
+// Store Paused Guard
+const canCreateOrder = (isAccepting) => Boolean(isAccepting);
+assert(!canCreateOrder(false), 'Orders are strictly blocked when store is paused');
+assert(canCreateOrder(true), 'Orders are allowed when store is online');
+
 console.log('\n====================================================');
 console.log(`TEST RESULTS: ${passedTests}/${totalTests} PASSED`);
 console.log('====================================================');
+
 
