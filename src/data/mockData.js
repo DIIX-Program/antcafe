@@ -15,12 +15,12 @@ export const STORE_SETTINGS = {
 };
 
 export const CATEGORIES = [
-  { id: 1, name: 'Tất cả', icon: 'grid-outline', count: 18 },
-  { id: 2, name: 'Cà Phê', icon: 'cafe-outline', count: 6 },
-  { id: 3, name: 'Trà Sữa', icon: 'wine-outline', count: 4 },
-  { id: 4, name: 'Trà Trái Cây', icon: 'leaf-outline', count: 4 },
-  { id: 5, name: 'Đá Xay', icon: 'snow-outline', count: 3 },
-  { id: 6, name: 'Bánh Ngọt', icon: 'nutrition-outline', count: 3 },
+  { id: 1, name: 'Tất cả', icon: 'sparkles-outline', activeIcon: 'sparkles', count: 18 },
+  { id: 2, name: 'Cà Phê', icon: 'cafe-outline', activeIcon: 'cafe', count: 6 },
+  { id: 3, name: 'Trà Sữa', icon: 'water-outline', activeIcon: 'water', count: 4 },
+  { id: 4, name: 'Trà Trái Cây', icon: 'leaf-outline', activeIcon: 'leaf', count: 4 },
+  { id: 5, name: 'Đá Xay', icon: 'ice-cream-outline', activeIcon: 'ice-cream', count: 3 },
+  { id: 6, name: 'Bánh Ngọt', icon: 'restaurant-outline', activeIcon: 'restaurant', count: 3 },
 ];
 
 export const OPTION_GROUPS = {

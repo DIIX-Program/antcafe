@@ -948,11 +948,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   crossSellSection: {
-    backgroundColor: '#FAF5FF',
+    backgroundColor: '#FFFBEB',
     borderRadius: RADIUS.lg,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#E9D5FF',
+    borderColor: '#FDE68A',
   },
   crossSellTitle: {
     fontSize: 14,

@@ -77,12 +77,115 @@ import SearchModal from './src/components/SearchModal';
 import AccountModal from './src/components/AccountModal';
 import NotificationModal from './src/components/NotificationModal';
 
+if (Platform.OS === 'web') {
+  if (typeof document !== 'undefined') {
+    try {
+      const fontLinkId = 'ant-coffee-typography-link';
+      if (!document.getElementById(fontLinkId)) {
+        const preconnect1 = document.createElement('link');
+        preconnect1.rel = 'preconnect';
+        preconnect1.href = 'https://fonts.googleapis.com';
+        document.head.appendChild(preconnect1);
+
+        const preconnect2 = document.createElement('link');
+        preconnect2.rel = 'preconnect';
+        preconnect2.href = 'https://fonts.gstatic.com';
+        preconnect2.crossOrigin = 'anonymous';
+        document.head.appendChild(preconnect2);
+
+        const fontLink = document.createElement('link');
+        fontLink.id = fontLinkId;
+        fontLink.rel = 'stylesheet';
+        fontLink.href =
+          'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Be+Vietnam+Pro:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=JetBrains+Mono:wght@500;600;700&display=swap';
+        document.head.appendChild(fontLink);
+      }
+
+      // Always update global style so hot-reload fixes font immediately
+      let styleGlobal = document.getElementById('ant-coffee-global-font-override');
+      if (!styleGlobal) {
+        styleGlobal = document.createElement('style');
+        styleGlobal.id = 'ant-coffee-global-font-override';
+        document.head.appendChild(styleGlobal);
+      }
+      styleGlobal.innerHTML = `
+        /* General document typography */
+        html, body, #root, input, button, textarea, select {
+          font-family: 'Plus Jakarta Sans', 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        /* React Native Web text: Apply font ONLY when NOT an icon font */
+        [class*="css-text"]:not([style*="ionicons"]):not([style*="Ionicons"]):not([style*="Material"]):not([style*="Feather"]):not([style*="FontAwesome"]):not([style*="AntDesign"]) {
+          font-family: 'Plus Jakarta Sans', 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        /* STRICTLY PROTECT VECTOR ICON FONTS (Never override with sans-serif) */
+        [style*="ionicons"],
+        [style*="Ionicons"],
+        [style*="font-family: ionicons"],
+        [style*="font-family: Ionicons"],
+        [style*="font-family: 'ionicons'"],
+        [style*="font-family: 'Ionicons'"],
+        [style*='font-family: "ionicons"'],
+        [style*='font-family: "Ionicons"'] {
+          font-family: ionicons, Ionicons !important;
+        }
+
+        body, html, #root {
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+          text-rendering: optimizeLegibility;
+        }
+      `;
+    } catch (e) {
+      // Graceful fallback
+    }
+  }
+}
+
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+const HERO_SLIDES = [
+  {
+    id: 'hero_1',
+    tag: 'ƯU ĐÃI ĐỘC QUYỀN',
+    tagColor: COLORS.accentOrange,
+    title: 'Cà Phê Muối Hoàng Gia',
+    desc: 'Kem muối béo mặn sánh mịn • Giảm 30% hôm nay',
+    image: 'https://images.unsplash.com/photo-1517701604599-bb29b565090c?w=600&auto=format&fit=crop&q=80',
+    ctaText: 'Đặt Thử Ngay',
+    bgColor: COLORS.primaryDark,
+    productId: 101,
+  },
+  {
+    id: 'hero_2',
+    tag: 'BEST SELLER 2026',
+    tagColor: '#059669',
+    title: 'Trà Lài Macchiato Phô Mai',
+    desc: 'Vị trà thanh tao hòa quyện kem phô mai béo ngậy',
+    image: 'https://images.unsplash.com/photo-1558857563-b37cf5a285d8?w=600&auto=format&fit=crop&q=80',
+    ctaText: 'Khám Phá',
+    bgColor: '#1E293B',
+    productId: 104,
+  },
+  {
+    id: 'hero_3',
+    tag: 'MÃ FREESHIP',
+    tagColor: '#DC2626',
+    title: 'Miễn Phí Giao Hàng',
+    desc: 'Freeship cho đơn hàng từ 50.000đ • Áp dụng tại giỏ',
+    image: 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=600&auto=format&fit=crop&q=80',
+    ctaText: 'Dùng Mã Ngay',
+    bgColor: COLORS.primary,
+    isCartAction: true,
+  },
+];
 
 export default function App() {
   console.log('[App] Rendering App component...');
   // Global & Multi-role state
   const [activeRole, setActiveRole] = useState('CUSTOMER'); // 'CUSTOMER' | 'STAFF' | 'OWNER'
+  const [activeHeroIndex, setActiveHeroIndex] = useState(0);
   const [isAcceptingOrders, setIsAcceptingOrders] = useState(
     STORE_SETTINGS.is_accepting_orders
   );
@@ -134,6 +237,12 @@ export default function App() {
   }, [activeRole, currentUser]);
 
   const mainScrollRef = useRef(null);
+
+  useEffect(() => {
+    if (typeof Ionicons?.loadFont === 'function') {
+      Ionicons.loadFont().catch(() => {});
+    }
+  }, []);
 
   // ==========================================================
   // ANDROID NAVIGATION BAR AUTO-HIDE (IMMERSIVE STICKY MODE)
@@ -1001,69 +1110,79 @@ export default function App() {
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.mainScrollContent}
             >
-              {/* Promo Banners Carousel */}
+              {/* Promo Sliderbar with Gesture Swiping & Liquid Dots */}
               <View style={styles.heroSection}>
                 <ScrollView
                   horizontal
-                  pagingEnabled
+                  pagingEnabled={Platform.OS !== 'web'}
+                  snapToInterval={SCREEN_WIDTH - 24}
+                  snapToAlignment="center"
+                  decelerationRate="fast"
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.heroScroll}
+                  onScroll={(e) => {
+                    const offset = e.nativeEvent.contentOffset.x;
+                    const index = Math.round(offset / (SCREEN_WIDTH - 28));
+                    if (index >= 0 && index < HERO_SLIDES.length && index !== activeHeroIndex) {
+                      setActiveHeroIndex(index);
+                    }
+                  }}
+                  scrollEventThrottle={16}
                 >
-                  <View style={[styles.heroCard, { backgroundColor: COLORS.primaryDark }]}>
-                    <View style={styles.heroTextWrap}>
-                      <View style={styles.heroTag}>
-                        <Text style={styles.heroTagText}>ƯU ĐÃI ĐỘC QUYỀN</Text>
-                      </View>
-                      <Text style={styles.heroTitle}>Cà Phê Muối Hoàng Gia</Text>
-                      <Text style={styles.heroDesc}>
-                        Kem muối béo mặn sánh mịn • Giảm ngay 30% hôm nay
-                      </Text>
-                      <TouchableOpacity
-                        style={styles.heroCta}
-                        onPress={() => handleOpenDetail(products[0])}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={styles.heroCtaText}>Đặt Thử Ngay</Text>
-                        <Ionicons name="arrow-forward" size={14} color={COLORS.primaryDark} />
-                      </TouchableOpacity>
-                    </View>
-                    <Image
-                      source={{
-                        uri: 'https://images.unsplash.com/photo-1517701604599-bb29b565090c?w=600&auto=format&fit=crop&q=80',
-                      }}
-                      style={styles.heroImage}
-                      resizeMode="cover"
-                    />
-                  </View>
-
-                  <View style={[styles.heroCard, { backgroundColor: COLORS.primary }]}>
-                    <View style={styles.heroTextWrap}>
-                      <View style={[styles.heroTag, { backgroundColor: '#FFF' }]}>
-                        <Text style={[styles.heroTagText, { color: COLORS.primary }]}>
-                          MÃ FREESHIP
+                  {HERO_SLIDES.map((slide, idx) => (
+                    <View
+                      key={slide.id}
+                      style={[
+                        styles.heroCard,
+                        { backgroundColor: slide.bgColor },
+                        Platform.OS === 'web' && styles.heroCardWeb,
+                      ]}
+                    >
+                      <View style={styles.heroTextWrap}>
+                        <View style={[styles.heroTag, { backgroundColor: slide.tagColor }]}>
+                          <Text style={styles.heroTagText}>{slide.tag}</Text>
+                        </View>
+                        <Text style={styles.heroTitle} numberOfLines={1}>{slide.title}</Text>
+                        <Text style={styles.heroDesc} numberOfLines={2}>
+                          {slide.desc}
                         </Text>
+                        <TouchableOpacity
+                          style={styles.heroCta}
+                          onPress={() => {
+                            if (slide.isCartAction) {
+                              setIsCartModalVisible(true);
+                            } else {
+                              const target = products.find((p) => p.id === slide.productId) || products[0];
+                              handleOpenDetail(target);
+                            }
+                          }}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={styles.heroCtaText}>{slide.ctaText}</Text>
+                          <Ionicons name="arrow-forward" size={13} color={COLORS.primaryDark} />
+                        </TouchableOpacity>
                       </View>
-                      <Text style={styles.heroTitle}>Miễn Phí Giao Hàng</Text>
-                      <Text style={styles.heroDesc}>
-                        Nhập mã 'FREESHIP' cho đơn hàng từ 50.000đ
-                      </Text>
-                      <TouchableOpacity
-                        style={styles.heroCta}
-                        onPress={() => setIsCartModalVisible(true)}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={styles.heroCtaText}>Dùng Mã Ngay</Text>
-                      </TouchableOpacity>
+                      <Image
+                        source={{ uri: slide.image }}
+                        style={styles.heroImage}
+                        resizeMode="cover"
+                      />
                     </View>
-                    <Image
-                      source={{
-                        uri: 'https://images.unsplash.com/photo-1558857563-b37cf5a285d8?w=600&auto=format&fit=crop&q=80',
-                      }}
-                      style={styles.heroImage}
-                      resizeMode="cover"
-                    />
-                  </View>
+                  ))}
                 </ScrollView>
+
+                {/* Hero Pagination Indicators */}
+                <View style={styles.heroPagination}>
+                  {HERO_SLIDES.map((_, i) => (
+                    <View
+                      key={`dot_${i}`}
+                      style={[
+                        styles.paginationDot,
+                        activeHeroIndex === i && styles.paginationDotActive,
+                      ]}
+                    />
+                  ))}
+                </View>
               </View>
 
               {/* Search Bar */}
@@ -1121,11 +1240,6 @@ export default function App() {
                     ]}
                     onPress={() => setSelectedFilterTag('BEST_SELLER')}
                   >
-                    <Ionicons
-                      name="flame"
-                      size={14}
-                      color={selectedFilterTag === 'BEST_SELLER' ? '#FFF' : COLORS.accentOrange}
-                    />
                     <Text
                       style={[
                         styles.filterChipText,
@@ -1143,11 +1257,6 @@ export default function App() {
                     ]}
                     onPress={() => setSelectedFilterTag('DISCOUNT')}
                   >
-                    <Ionicons
-                      name="pricetag"
-                      size={13}
-                      color={selectedFilterTag === 'DISCOUNT' ? '#FFF' : COLORS.primary}
-                    />
                     <Text
                       style={[
                         styles.filterChipText,
@@ -1165,11 +1274,6 @@ export default function App() {
                     ]}
                     onPress={() => setSelectedFilterTag('FEATURED')}
                   >
-                    <Ionicons
-                      name="star"
-                      size={13}
-                      color={selectedFilterTag === 'FEATURED' ? '#FFF' : COLORS.accentAmber}
-                    />
                     <Text
                       style={[
                         styles.filterChipText,
@@ -1182,9 +1286,12 @@ export default function App() {
                 </ScrollView>
               </View>
 
-              {/* Categories Horizontal Selector */}
+              {/* Categories Liquid Glass Capsule Navigation */}
               <View style={styles.categoriesSection}>
-                <Text style={styles.sectionHeaderTitle}>Danh mục thức uống</Text>
+                <View style={styles.categoriesHeaderRow}>
+                  <Text style={styles.sectionHeaderTitle}>Danh mục thức uống</Text>
+                  <Text style={styles.sectionHeaderSubtitle}>Chọn vị yêu thích</Text>
+                </View>
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
@@ -1192,36 +1299,55 @@ export default function App() {
                 >
                   {categories.map((cat) => {
                     const isSelected = selectedCategory === cat.id;
+                    const iconName = isSelected && cat.activeIcon ? cat.activeIcon : cat.icon;
                     return (
                       <TouchableOpacity
                         key={cat.id}
                         style={[
-                          styles.categoryCard,
-                          isSelected && styles.categoryCardSelected,
+                          styles.glassCategoryPill,
+                          isSelected && styles.glassCategoryPillSelected,
+                          Platform.OS === 'web' && styles.glassCategoryPillWeb,
                         ]}
                         onPress={() => setSelectedCategory(cat.id)}
-                        activeOpacity={0.8}
+                        activeOpacity={0.82}
                       >
                         <View
                           style={[
-                            styles.categoryIconCircle,
-                            isSelected && styles.categoryIconCircleSelected,
+                            styles.categoryIconWrap,
+                            isSelected && styles.categoryIconWrapSelected,
                           ]}
                         >
                           <Ionicons
-                            name={cat.icon}
-                            size={20}
-                            color={isSelected ? '#FFF' : COLORS.primaryDark}
+                            name={iconName}
+                            size={16}
+                            color={isSelected ? '#FFF' : COLORS.accentOrange}
                           />
                         </View>
                         <Text
                           style={[
-                            styles.categoryName,
-                            isSelected && styles.categoryNameSelected,
+                            styles.categoryPillName,
+                            isSelected && styles.categoryPillNameSelected,
                           ]}
                         >
                           {cat.name}
                         </Text>
+                        {cat.count ? (
+                          <View
+                            style={[
+                              styles.categoryCountBadge,
+                              isSelected && styles.categoryCountBadgeSelected,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.categoryCountText,
+                                isSelected && styles.categoryCountTextSelected,
+                              ]}
+                            >
+                              {cat.count}
+                            </Text>
+                          </View>
+                        ) : null}
                       </TouchableOpacity>
                     );
                   })}
@@ -1548,18 +1674,21 @@ const styles = StyleSheet.create({
     marginVertical: 14,
   },
   heroScroll: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     gap: 12,
   },
   heroCard: {
-    width: SCREEN_WIDTH - 32,
-    height: 155,
-    borderRadius: RADIUS.lg,
+    width: SCREEN_WIDTH - 24,
+    height: 156,
+    borderRadius: RADIUS.xl,
     flexDirection: 'row',
     alignItems: 'center',
     overflow: 'hidden',
     padding: 16,
     ...SHADOWS.md,
+  },
+  heroCardWeb: {
+    cursor: 'pointer',
   },
   heroTextWrap: {
     flex: 1.3,
@@ -1569,8 +1698,8 @@ const styles = StyleSheet.create({
   heroTag: {
     alignSelf: 'flex-start',
     backgroundColor: COLORS.accentOrange,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: 8.5,
+    paddingVertical: 3.5,
     borderRadius: RADIUS.xs,
     marginBottom: 6,
   },
@@ -1581,26 +1710,27 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   heroTitle: {
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 18.5,
+    fontWeight: '900',
     color: '#FFF',
     marginBottom: 4,
   },
   heroDesc: {
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.85)',
+    fontSize: 11.5,
+    color: 'rgba(255,255,255,0.88)',
     marginBottom: 10,
-    lineHeight: 15,
+    lineHeight: 16,
   },
   heroCta: {
     alignSelf: 'flex-start',
     backgroundColor: '#FFF',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    paddingHorizontal: 15,
+    paddingVertical: 6.5,
     borderRadius: RADIUS.full,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    ...SHADOWS.sm,
   },
   heroCtaText: {
     color: COLORS.primaryDark,
@@ -1608,13 +1738,32 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   heroImage: {
-    width: 125,
-    height: 125,
-    borderRadius: RADIUS.md,
+    width: 124,
+    height: 124,
+    borderRadius: RADIUS.lg,
+  },
+  heroPagination: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 10,
+  },
+  paginationDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: COLORS.borderLight,
+  },
+  paginationDotActive: {
+    width: 22,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: COLORS.accentOrange,
   },
   searchContainer: {
     paddingHorizontal: 16,
-    marginBottom: 14,
+    marginBottom: 16,
   },
   searchBar: {
     flexDirection: 'row',
@@ -1624,7 +1773,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: RADIUS.full,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: COLORS.borderLight,
     gap: 10,
     ...SHADOWS.sm,
   },
@@ -1641,16 +1790,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
     borderRadius: RADIUS.full,
     backgroundColor: COLORS.surface,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: COLORS.borderLight,
   },
   filterChipActive: {
     backgroundColor: COLORS.primaryDark,
     borderColor: COLORS.primaryDark,
+    ...SHADOWS.sm,
   },
   filterChipText: {
     fontSize: 12,
@@ -1662,52 +1812,87 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   categoriesSection: {
-    marginBottom: 16,
+    marginBottom: 18,
   },
-  sectionHeaderTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: COLORS.primaryDark,
+  categoriesHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     marginBottom: 10,
   },
+  sectionHeaderTitle: {
+    fontSize: 16.5,
+    fontWeight: '800',
+    color: COLORS.primaryDark,
+  },
+  sectionHeaderSubtitle: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    fontWeight: '500',
+  },
   categoriesScroll: {
     paddingHorizontal: 16,
-    gap: 12,
+    gap: 10,
   },
-  categoryCard: {
+  glassCategoryPill: {
+    flexDirection: 'row',
     alignItems: 'center',
-    width: 74,
-  },
-  categoryCardSelected: {
-    transform: [{ scale: 1.05 }],
-  },
-  categoryIconCircle: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: RADIUS.full,
     backgroundColor: COLORS.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 6,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: COLORS.borderLight,
+    gap: 7,
     ...SHADOWS.sm,
   },
-  categoryIconCircleSelected: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-    ...SHADOWS.md,
+  glassCategoryPillWeb: {
+    backdropFilter: 'blur(12px)',
+    WebkitBackdropFilter: 'blur(12px)',
+    cursor: 'pointer',
   },
-  categoryName: {
-    fontSize: 11,
+  glassCategoryPillSelected: {
+    backgroundColor: COLORS.primaryDark,
+    borderColor: COLORS.primaryDark,
+    ...SHADOWS.glowAmber,
+  },
+  categoryIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(217, 119, 6, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoryIconWrapSelected: {
+    backgroundColor: COLORS.accentOrange,
+  },
+  categoryPillName: {
+    fontSize: 12.5,
     fontWeight: '600',
-    color: COLORS.textSecondary,
-    textAlign: 'center',
+    color: COLORS.textPrimary,
   },
-  categoryNameSelected: {
-    color: COLORS.primary,
+  categoryPillNameSelected: {
+    color: '#FFF',
     fontWeight: '800',
+  },
+  categoryCountBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: RADIUS.full,
+    backgroundColor: COLORS.surfaceSoft,
+  },
+  categoryCountBadgeSelected: {
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+  },
+  categoryCountText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+  },
+  categoryCountTextSelected: {
+    color: '#FFF',
   },
   catalogSection: {
     paddingHorizontal: 16,
@@ -1745,23 +1930,22 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   productGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    flexDirection: 'column',
+    width: '100%',
   },
   productCol: {
-    width: '48.5%',
-    marginBottom: 14,
+    width: '100%',
+    marginBottom: 12,
   },
   floatingOrderBanner: {
     position: 'absolute',
-    bottom: 88,
+    bottom: 86,
     left: 16,
     right: 16,
-    backgroundColor: Platform.OS === 'web' ? 'rgba(30, 41, 59, 0.88)' : 'rgba(30, 41, 59, 0.96)',
+    backgroundColor: Platform.OS === 'web' ? 'rgba(28, 25, 23, 0.88)' : 'rgba(28, 25, 23, 0.96)',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderRadius: RADIUS.lg,
+    borderRadius: RADIUS.xl,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1795,14 +1979,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    backgroundColor: COLORS.accentOrange,
+    paddingHorizontal: 12,
+    paddingVertical: 6.5,
     borderRadius: RADIUS.full,
   },
   floatingOrderCtaText: {
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 11.5,
+    fontWeight: '800',
     color: '#FFF',
   },
 });

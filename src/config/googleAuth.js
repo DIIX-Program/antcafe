@@ -1,13 +1,15 @@
-import clientSecretJson from '../../client_secret.json';
-
-// Trích xuất cấu hình OAuth Web từ file client_secret.json
-const webConfig = clientSecretJson?.web || clientSecretJson?.installed || {};
+/**
+ * Ant Coffee & Tea - Google OAuth 2.0 Configuration
+ * Safe configuration supporting EXPO_PUBLIC environment variables and runtime configuration.
+ */
 
 export const GOOGLE_AUTH_CONFIG = {
-  webClientId: webConfig.client_id || '',
-  projectId: webConfig.project_id || '',
-  authUri: webConfig.auth_uri || '',
-  tokenUri: webConfig.token_uri || '',
-  clientSecret: webConfig.client_secret || '',
+  webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || '',
+  projectId: process.env.EXPO_PUBLIC_GOOGLE_PROJECT_ID || 'ant-coffee-tea',
+  authUri: 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenUri: 'https://oauth2.googleapis.com/token',
+  clientSecret: '',
   scopes: ['openid', 'profile', 'email'],
 };
+
+export default GOOGLE_AUTH_CONFIG;
