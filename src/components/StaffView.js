@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOWS, RADIUS, SPACING, TOUCH_TARGET } from '../theme/theme';
-import { subscribeNewMessage } from '../services/socket';
+import { subscribeNewMessage, sendOrderMessage, getOrderMessagesViaSocket } from '../services/socket';
+import { fetchOrderMessagesApi, sendOrderMessageApi } from '../api/services';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -64,6 +65,12 @@ export default function StaffView({
   const [orderToCancel, setOrderToCancel] = useState(null);
   const [selectedCancelReason, setSelectedCancelReason] = useState(CANCEL_REASONS[0]);
 
+  // Chat with customer state
+  const [chatModalVisible, setChatModalVisible] = useState(false);
+  const [activeChatOrder, setActiveChatOrder] = useState(null);
+  const [orderMessages, setOrderMessages] = useState({});
+  const [staffChatInput, setStaffChatInput] = useState('');
+
   // Toast / feedback message
   const [feedbackToast, setFeedbackToast] = useState('');
 
@@ -81,15 +88,95 @@ export default function StaffView({
     }, 2800);
   };
 
-  // Real-time listener for incoming customer messages / notes (Requirement B.3 & B.6)
+  // Real-time listener for incoming customer messages with strict deduplication
   React.useEffect(() => {
     const unsub = subscribeNewMessage((msg) => {
+      const oId = Number(msg.orderId);
+      if (oId) {
+        setOrderMessages((prev) => {
+          const list = prev[oId] || [];
+          const exists = list.some((m) =>
+            (m.id && msg.id && String(m.id) === String(msg.id)) ||
+            (m.message === msg.message &&
+             m.senderRole === msg.senderRole &&
+             Math.abs(new Date(m.timestamp || 0) - new Date(msg.timestamp || 0)) < 4000)
+          );
+          if (exists) return prev;
+          return {
+            ...prev,
+            [oId]: [...list, msg],
+          };
+        });
+      }
+
       if (msg.senderRole === 'CUSTOMER') {
         triggerToast(`💬 Khách nhắn (#${msg.orderCode || msg.orderId}): "${msg.message}"`);
       }
     });
     return () => unsub();
   }, []);
+
+  const openOrderChat = (order) => {
+    setActiveChatOrder(order);
+    setChatModalVisible(true);
+    setStaffChatInput('');
+    const oId = order.id;
+
+    fetchOrderMessagesApi(oId).then((history) => {
+      if (history && history.length > 0) {
+        setOrderMessages((prev) => ({
+          ...prev,
+          [oId]: history,
+        }));
+      } else {
+        getOrderMessagesViaSocket(oId, (socketHistory) => {
+          if (socketHistory && socketHistory.length > 0) {
+            setOrderMessages((prev) => ({
+              ...prev,
+              [oId]: socketHistory,
+            }));
+          }
+        });
+      }
+    });
+  };
+
+  const handleSendStaffMessage = (customText = null) => {
+    const text = customText || staffChatInput;
+    if (!text || !text.trim() || !activeChatOrder) return;
+
+    const trimmed = text.trim();
+    const payload = {
+      orderId: activeChatOrder.id,
+      orderCode: activeChatOrder.orderCode || activeChatOrder.order_code,
+      message: trimmed,
+      senderName: 'Barista Minh Tuấn',
+      senderRole: 'STAFF',
+    };
+
+    const sent = sendOrderMessage(payload);
+    if (!sent) {
+      sendOrderMessageApi(activeChatOrder.id, payload).then((res) => {
+        if (res && res.data) {
+          const newMsg = res.data;
+          setOrderMessages((prev) => {
+            const list = prev[activeChatOrder.id] || [];
+            const exists = list.some((m) =>
+              (m.id && newMsg.id && String(m.id) === String(newMsg.id)) ||
+              (m.message === newMsg.message && m.senderRole === newMsg.senderRole)
+            );
+            if (exists) return prev;
+            return {
+              ...prev,
+              [activeChatOrder.id]: [...list, newMsg],
+            };
+          });
+        }
+      });
+    }
+
+    setStaffChatInput('');
+  };
 
   const toggleExpand = (orderId) => {
     setExpandedOrders((prev) => ({
@@ -554,6 +641,29 @@ export default function StaffView({
                       </View>
                     </View>
 
+                    {/* Customer Chat & Live Notes Button */}
+                    <View style={styles.cardChatRow}>
+                      <TouchableOpacity
+                        style={styles.btnChatCustomer}
+                        onPress={() => openOrderChat(order)}
+                        activeOpacity={0.8}
+                      >
+                        <View style={styles.btnChatCustomerLeft}>
+                          <Ionicons name="chatbubbles-outline" size={15} color={COLORS.primary} />
+                          <Text style={styles.btnChatCustomerText}>
+                            Trò chuyện với khách {orderMessages[order.id]?.length ? `(${orderMessages[order.id].length})` : ''}
+                          </Text>
+                        </View>
+                        {orderMessages[order.id]?.some((m) => m.senderRole === 'CUSTOMER') ? (
+                          <View style={styles.customerNoteBadge}>
+                            <Text style={styles.customerNoteBadgeText}>Có tin nhắn</Text>
+                          </View>
+                        ) : (
+                          <Ionicons name="chevron-forward" size={14} color={COLORS.textMuted} />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+
                     {/* Operational Action Buttons (Touch Target >= 44px) */}
                     <View style={styles.actionRow}>
                       {isPending && (
@@ -859,6 +969,129 @@ export default function StaffView({
                   activeOpacity={0.85}
                 >
                   <Text style={styles.dialogConfirmBtnText}>Xác nhận từ chối</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Real-time 2-Way Chat Modal for Staff/Barista */}
+      {chatModalVisible && activeChatOrder && (
+        <Modal
+          visible={true}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setChatModalVisible(false)}
+        >
+          <View style={styles.modalBackdrop}>
+            <View style={styles.chatModalCard}>
+              {/* Header */}
+              <View style={styles.chatModalHeader}>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={styles.chatModalTitle}>
+                      Chat đơn #{activeChatOrder.orderCode || activeChatOrder.id}
+                    </Text>
+                    <View style={styles.liveIndicator}>
+                      <View style={styles.liveIndicatorDot} />
+                      <Text style={styles.liveIndicatorText}>Live</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.chatModalSubtitle}>
+                    {activeChatOrder.customer_name || 'Khách hàng'} • {activeChatOrder.phone || '0901 234 567'}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.chatModalCloseBtn}
+                  onPress={() => setChatModalVisible(false)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="close" size={22} color={COLORS.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Messages List */}
+              <ScrollView
+                style={styles.chatMessagesArea}
+                contentContainerStyle={styles.chatMessagesContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {(!orderMessages[activeChatOrder.id] || orderMessages[activeChatOrder.id].length === 0) ? (
+                  <View style={styles.chatEmptyWrap}>
+                    <Ionicons name="chatbubbles-outline" size={36} color={COLORS.textMuted} />
+                    <Text style={styles.chatEmptyText}>Chưa có trao đổi nào</Text>
+                    <Text style={styles.chatEmptySub}>
+                      Khách hàng hoặc bạn có thể gửi tin nhắn phản hồi trực tiếp tại đây!
+                    </Text>
+                  </View>
+                ) : (
+                  orderMessages[activeChatOrder.id].map((m, idx) => {
+                    const isStaff = m.senderRole === 'STAFF';
+                    return (
+                      <View
+                        key={m.id || idx}
+                        style={[
+                          styles.chatBubble,
+                          isStaff ? styles.chatBubbleStaff : styles.chatBubbleCustomer,
+                        ]}
+                      >
+                        <Text style={[styles.chatBubbleSender, isStaff && styles.chatBubbleSenderStaff]}>
+                          {isStaff ? 'Bạn (Barista)' : `${m.senderName || 'Khách'}`}:
+                        </Text>
+                        <Text style={[styles.chatBubbleText, isStaff && styles.chatBubbleTextStaff]}>
+                          {m.message}
+                        </Text>
+                      </View>
+                    );
+                  })
+                )}
+              </ScrollView>
+
+              {/* Quick response suggestions for Staff */}
+              <View style={styles.quickReplyRow}>
+                <TouchableOpacity
+                  style={styles.quickReplyChip}
+                  onPress={() => handleSendStaffMessage('Quán đã nhận ghi chú của bạn rồi nhé!')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.quickReplyChipText}>+ Đã nhận ghi chú</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.quickReplyChip}
+                  onPress={() => handleSendStaffMessage('Món của bạn đang được pha chế ạ!')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.quickReplyChipText}>+ Đang pha chế</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.quickReplyChip}
+                  onPress={() => handleSendStaffMessage('Món đã sẵn sàng nhận tại quầy ạ!')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.quickReplyChipText}>+ Sẵn sàng lấy</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Chat Input */}
+              <View style={styles.staffChatInputRow}>
+                <TextInput
+                  style={styles.staffChatTextInput}
+                  placeholder="Nhập tin nhắn phản hồi cho khách..."
+                  placeholderTextColor={COLORS.textMuted}
+                  value={staffChatInput}
+                  onChangeText={setStaffChatInput}
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.staffChatSendBtn,
+                    !staffChatInput.trim() && { opacity: 0.5 },
+                  ]}
+                  onPress={() => handleSendStaffMessage()}
+                  disabled={!staffChatInput.trim()}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="send" size={16} color="#FFF" />
                 </TouchableOpacity>
               </View>
             </View>
@@ -1686,5 +1919,205 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#FFF',
+  },
+  cardChatRow: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
+  btnChatCustomer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F5EBE6',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: '#E8D5CA',
+  },
+  btnChatCustomerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  btnChatCustomerText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.primaryDark,
+  },
+  customerNoteBadge: {
+    backgroundColor: COLORS.accentRed,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  customerNoteBadgeText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  chatModalCard: {
+    width: '92%',
+    maxWidth: 480,
+    maxHeight: '80%',
+    backgroundColor: '#FFF',
+    borderRadius: RADIUS.lg,
+    overflow: 'hidden',
+    ...SHADOWS.lg,
+  },
+  chatModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEE',
+    backgroundColor: COLORS.surfaceSoft,
+  },
+  chatModalTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  chatModalSubtitle: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  chatModalCloseBtn: {
+    padding: 6,
+  },
+  liveIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  liveIndicatorDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: COLORS.accentRed,
+  },
+  liveIndicatorText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.accentRed,
+  },
+  chatMessagesArea: {
+    maxHeight: 280,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  chatMessagesContent: {
+    gap: 8,
+    paddingBottom: 10,
+  },
+  chatEmptyWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+    gap: 6,
+  },
+  chatEmptyText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  chatEmptySub: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  chatBubble: {
+    maxWidth: '85%',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: RADIUS.md,
+  },
+  chatBubbleCustomer: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#F3F4F6',
+    borderTopLeftRadius: 2,
+  },
+  chatBubbleStaff: {
+    alignSelf: 'flex-end',
+    backgroundColor: COLORS.primary,
+    borderTopRightRadius: 2,
+  },
+  chatBubbleSender: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+    marginBottom: 2,
+  },
+  chatBubbleSenderStaff: {
+    color: 'rgba(255, 255, 255, 0.85)',
+  },
+  chatBubbleText: {
+    fontSize: 13,
+    color: COLORS.textPrimary,
+    lineHeight: 18,
+  },
+  chatBubbleTextStaff: {
+    color: '#FFF',
+  },
+  quickReplyRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: '#FAFAFA',
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+  },
+  quickReplyChip: {
+    backgroundColor: '#FFF',
+    borderWidth: 1,
+    borderColor: '#E0D0C5',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+  },
+  quickReplyChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  staffChatInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#EEE',
+    backgroundColor: '#FFF',
+    gap: 8,
+  },
+  staffChatTextInput: {
+    flex: 1,
+    minHeight: 40,
+    maxHeight: 80,
+    backgroundColor: COLORS.surfaceSoft,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    fontSize: 13,
+    color: COLORS.textPrimary,
+  },
+  staffChatSendBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

@@ -1,7 +1,8 @@
 import { getDbPool, sql } from '../config/db.js';
-import { emitOrderCreated, emitOrderStatusUpdated } from '../socket/socketHandler.js';
+import { emitOrderCreated, emitOrderStatusUpdated, emitOrderMessage } from '../socket/socketHandler.js';
 import { createMoMoPayment } from '../services/momoService.js';
 import { notifyOrderCreated, notifyOrderStatusUpdated } from '../services/notificationService.js';
+import { getOrderMessages, saveOrderMessage } from '../services/chatService.js';
 
 export async function createOrder(req, res) {
   try {
@@ -511,3 +512,34 @@ function formatRelativeTime(date) {
   const minutes = String(d.getMinutes()).padStart(2, '0');
   return `${hours}:${minutes} Hôm nay`;
 }
+
+export async function getOrderMessagesHandler(req, res) {
+  try {
+    const orderId = req.params.id;
+    const messages = await getOrderMessages(orderId);
+    return res.json({ success: true, data: messages });
+  } catch (err) {
+    console.error('[Order] getOrderMessagesHandler error:', err);
+    return res.status(500).json({ success: false, message: 'Lỗi tải tin nhắn', error: err.message });
+  }
+}
+
+export async function sendOrderMessageHandler(req, res) {
+  try {
+    const orderId = req.params.id;
+    const { message, senderName, senderRole, orderCode } = req.body;
+    const saved = await saveOrderMessage({
+      orderId,
+      orderCode,
+      senderName: senderName || req.user?.full_name || 'Khách hàng',
+      senderRole: senderRole || req.user?.role || 'CUSTOMER',
+      message,
+    });
+    emitOrderMessage(saved);
+    return res.status(201).json({ success: true, data: saved });
+  } catch (err) {
+    console.error('[Order] sendOrderMessageHandler error:', err);
+    return res.status(500).json({ success: false, message: 'Lỗi gửi tin nhắn', error: err.message });
+  }
+}
+

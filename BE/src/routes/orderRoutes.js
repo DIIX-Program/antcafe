@@ -3,7 +3,9 @@ import {
   createOrder, 
   getAllOrders, 
   getMyOrders, 
-  updateOrderStatus 
+  updateOrderStatus,
+  getOrderMessagesHandler,
+  sendOrderMessageHandler
 } from '../controllers/orderController.js';
 import { optionalAuth } from '../middlewares/auth.js';
 
@@ -29,5 +31,9 @@ router.patch('/:id/cancel', optionalAuth, (req, res, next) => {
   req.body.status = 'CANCELLED';
   updateOrderStatus(req, res, next);
 });
+
+// Order 2-way chat messages
+router.get('/:id/messages', optionalAuth, getOrderMessagesHandler);
+router.post('/:id/messages', optionalAuth, sendOrderMessageHandler);
 
 export default router;

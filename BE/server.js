@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
+dotenv.config();
 
 import { getDbPool } from './src/config/db.js';
 import { initSocketIO } from './src/socket/socketHandler.js';
@@ -20,8 +21,7 @@ import staffRoutes from './src/routes/staffRoutes.js';
 import adminRoutes from './src/routes/adminRoutes.js';
 import paymentRoutes from './src/routes/paymentRoutes.js';
 import notificationRoutes from './src/routes/notificationRoutes.js';
-
-dotenv.config();
+import { migrateChatTables } from './src/scripts/migrateChat.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -120,9 +120,10 @@ server.listen(PORT, HOST, async () => {
   console.log(`🚀 Ready to accept requests from Frontend & Tunnels`);
   console.log(`======================================================\n`);
 
-  // Ensure DB connection is warmed up
+  // Ensure DB connection is warmed up and chat tables exist
   try {
     await getDbPool();
+    await migrateChatTables();
   } catch (err) {
     console.error('Initial DB connection failed:', err.message);
   }
