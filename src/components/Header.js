@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, Platform, Alert, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS, SHADOWS, RADIUS } from '../theme/theme';
 
@@ -20,7 +20,13 @@ export default function Header({
   onOpenLogin,
   onOpenAccount,
   onLogout,
+  socketStatus = 'CONNECTED',
+  unreadNotificationCount = 0,
+  onOpenNotifications,
 }) {
+  const { width: windowWidth } = useWindowDimensions();
+  const isCompact = windowWidth < 430;
+
   const webGlass = Platform.OS === 'web'
     ? { backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }
     : {};
@@ -42,6 +48,15 @@ export default function Header({
     }
   };
 
+  const handleSocketStatusPress = () => {
+    const msg = socketStatus === 'CONNECTED'
+      ? 'Hệ thống đang kết nối trực tiếp (Live Realtime). Dữ liệu đồng bộ tức thì.'
+      : socketStatus === 'RECONNECTING'
+      ? 'Đang thử kết nối lại với máy chủ...'
+      : 'Đang ở chế độ ngoại tuyến (Offline).';
+    Alert.alert('Trạng thái kết nối', msg);
+  };
+
   // 1. STAFF POS HEADER
   if (activeRole === 'STAFF') {
     return (
@@ -54,7 +69,26 @@ export default function Header({
               resizeMode="contain"
             />
             <View style={styles.brandTextWrap}>
-              <Text style={styles.brandName} numberOfLines={1}>ANT COFFEE</Text>
+              <View style={styles.brandTitleRow}>
+                <Text style={styles.brandName} numberOfLines={1}>ANT COFFEE</Text>
+                <TouchableOpacity
+                  style={[
+                    styles.microLiveBadge,
+                    isCompact && styles.microLiveBadgeCompact,
+                    socketStatus === 'CONNECTED' ? styles.liveBadgeOnline : socketStatus === 'RECONNECTING' ? styles.liveBadgeReconnecting : styles.liveBadgeOffline
+                  ]}
+                  onPress={handleSocketStatusPress}
+                  activeOpacity={0.7}
+                  accessibilityLabel={`Kết nối ${socketStatus}`}
+                >
+                  <View style={[styles.liveBeaconDot, { backgroundColor: socketStatus === 'CONNECTED' ? '#10B981' : socketStatus === 'RECONNECTING' ? '#F59E0B' : '#EF4444' }]} />
+                  {!isCompact && (
+                    <Text style={styles.liveBadgeText}>
+                      {socketStatus === 'CONNECTED' ? 'Live' : socketStatus === 'RECONNECTING' ? 'Retry' : 'Off'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
               <View style={[styles.roleBadge, { backgroundColor: '#EFF6FF' }]}>
                 <Ionicons name="receipt" size={11} color={COLORS.primary} />
                 <Text style={[styles.roleBadgeText, { color: COLORS.primary }]} numberOfLines={1}>POS THU NGÂN</Text>
@@ -63,6 +97,14 @@ export default function Header({
           </View>
 
           <View style={styles.actionRowResponsive}>
+            {/* Notification Bell with Red Dot */}
+            <TouchableOpacity style={styles.notifBtn} onPress={onOpenNotifications} activeOpacity={0.8} accessibilityLabel="Mở thông báo">
+              <View style={styles.notifIconWrap}>
+                <Ionicons name="notifications-outline" size={18} color={COLORS.primary} />
+                {unreadNotificationCount > 0 && <View style={styles.redDot} />}
+              </View>
+            </TouchableOpacity>
+
             <View style={styles.userInfoWrap}>
               <Text style={styles.userRoleText}>Nhân viên</Text>
               <Text style={styles.userRoleName} numberOfLines={1}>
@@ -96,7 +138,26 @@ export default function Header({
               resizeMode="contain"
             />
             <View style={styles.brandTextWrap}>
-              <Text style={styles.brandName} numberOfLines={1}>ANT COFFEE</Text>
+              <View style={styles.brandTitleRow}>
+                <Text style={styles.brandName} numberOfLines={1}>ANT COFFEE</Text>
+                <TouchableOpacity
+                  style={[
+                    styles.microLiveBadge,
+                    isCompact && styles.microLiveBadgeCompact,
+                    socketStatus === 'CONNECTED' ? styles.liveBadgeOnline : socketStatus === 'RECONNECTING' ? styles.liveBadgeReconnecting : styles.liveBadgeOffline
+                  ]}
+                  onPress={handleSocketStatusPress}
+                  activeOpacity={0.7}
+                  accessibilityLabel={`Kết nối ${socketStatus}`}
+                >
+                  <View style={[styles.liveBeaconDot, { backgroundColor: socketStatus === 'CONNECTED' ? '#10B981' : socketStatus === 'RECONNECTING' ? '#F59E0B' : '#EF4444' }]} />
+                  {!isCompact && (
+                    <Text style={styles.liveBadgeText}>
+                      {socketStatus === 'CONNECTED' ? 'Live' : socketStatus === 'RECONNECTING' ? 'Retry' : 'Off'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
               <View style={[styles.roleBadge, { backgroundColor: '#FEF3C7' }]}>
                 <Ionicons name="storefront" size={11} color="#D97706" />
                 <Text style={[styles.roleBadgeText, { color: '#B45309' }]} numberOfLines={1}>CHỦ QUÁN</Text>
@@ -105,6 +166,14 @@ export default function Header({
           </View>
 
           <View style={styles.actionRowResponsive}>
+            {/* Notification Bell with Red Dot */}
+            <TouchableOpacity style={styles.notifBtn} onPress={onOpenNotifications} activeOpacity={0.8} accessibilityLabel="Mở thông báo">
+              <View style={styles.notifIconWrap}>
+                <Ionicons name="notifications-outline" size={18} color={COLORS.primary} />
+                {unreadNotificationCount > 0 && <View style={styles.redDot} />}
+              </View>
+            </TouchableOpacity>
+
             <View style={styles.userInfoWrap}>
               <Text style={styles.userRoleText}>Chủ quán</Text>
               <Text style={styles.userRoleName} numberOfLines={1}>
@@ -139,8 +208,28 @@ export default function Header({
             style={styles.logo}
             resizeMode="contain"
           />
-          <View>
-            <Text style={styles.brandName}>ANT COFFEE</Text>
+          <View style={styles.brandTextWrap}>
+            <View style={styles.brandTitleRow}>
+              <Text style={styles.brandName}>ANT COFFEE</Text>
+              {/* Responsive Micro Live Beacon (Gọn gàng, tinh tế, không chiếm chỗ) */}
+              <TouchableOpacity
+                style={[
+                  styles.microLiveBadge,
+                  isCompact && styles.microLiveBadgeCompact,
+                  socketStatus === 'CONNECTED' ? styles.liveBadgeOnline : socketStatus === 'RECONNECTING' ? styles.liveBadgeReconnecting : styles.liveBadgeOffline
+                ]}
+                onPress={handleSocketStatusPress}
+                activeOpacity={0.7}
+                accessibilityLabel={`Kết nối ${socketStatus}`}
+              >
+                <View style={[styles.liveBeaconDot, { backgroundColor: socketStatus === 'CONNECTED' ? '#10B981' : socketStatus === 'RECONNECTING' ? '#F59E0B' : '#EF4444' }]} />
+                {!isCompact && (
+                  <Text style={styles.liveBadgeText}>
+                    {socketStatus === 'CONNECTED' ? 'Live' : socketStatus === 'RECONNECTING' ? 'Retry' : 'Off'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
             <View style={styles.statusPill}>
               <View
                 style={[
@@ -156,6 +245,20 @@ export default function Header({
         </View>
 
         <View style={styles.actionRow}>
+
+          {/* Notification Button with Small Red Dot */}
+          <TouchableOpacity
+            style={styles.notifBtn}
+            onPress={onOpenNotifications}
+            activeOpacity={0.8}
+            accessibilityLabel="Mở thông báo"
+          >
+            <View style={styles.notifIconWrap}>
+              <Ionicons name="notifications-outline" size={19} color={COLORS.primary} />
+              {unreadNotificationCount > 0 && <View style={styles.redDot} />}
+            </View>
+          </TouchableOpacity>
+
           {/* Cart Button */}
           <TouchableOpacity
             style={styles.cartButton}
@@ -334,6 +437,104 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E2E8F0',
     ...SHADOWS.sm,
+  },
+  notifBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#FFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    ...SHADOWS.sm,
+  },
+  notifIconWrap: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  redDot: {
+    position: 'absolute',
+    top: -1,
+    right: -2,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#EF4444',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    zIndex: 10,
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.6,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  notifBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: COLORS.error,
+    minWidth: 17,
+    height: 17,
+    borderRadius: 8.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: '#FFF',
+  },
+  notifBadgeText: {
+    color: '#FFF',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  brandTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  microLiveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 3,
+  },
+  microLiveBadgeCompact: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  liveBadgeOnline: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+  },
+  liveBadgeReconnecting: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
+  liveBadgeOffline: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  liveBeaconDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  liveBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#065F46',
+    letterSpacing: 0.3,
   },
   badge: {
     position: 'absolute',

@@ -1,6 +1,7 @@
 import { getDbPool, sql } from '../config/db.js';
 import { emitOrderCreated, emitOrderStatusUpdated } from '../socket/socketHandler.js';
 import { createMoMoPayment } from '../services/momoService.js';
+import { notifyOrderCreated, notifyOrderStatusUpdated } from '../services/notificationService.js';
 
 export async function createOrder(req, res) {
   try {
@@ -227,6 +228,11 @@ export async function createOrder(req, res) {
 
     // 5. Broadcast real-time WebSocket event
     emitOrderCreated(completeOrder);
+
+    // 6. Automatically send push notification for Order Created (Requirement A.2)
+    notifyOrderCreated(completeOrder).catch(err => {
+      console.warn('[Push Notification] notifyOrderCreated background error:', err.message);
+    });
 
     return res.status(201).json({
       success: true,
@@ -481,6 +487,11 @@ export async function updateOrderStatus(req, res) {
     };
 
     emitOrderStatusUpdated(broadcastOrder);
+
+    // Automatically send push notification for Order Status Updated (Requirement A.2)
+    notifyOrderStatusUpdated(broadcastOrder).catch(err => {
+      console.warn('[Push Notification] notifyOrderStatusUpdated background error:', err.message);
+    });
 
     return res.json({
       success: true,

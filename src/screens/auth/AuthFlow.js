@@ -321,9 +321,15 @@ export default function AuthFlow({
   useEffect(() => {
     let timer;
     if (isCounting && countdown > 0) {
-      timer = setInterval(() => setCountdown((prev) => prev - 1), 1000);
-    } else if (countdown === 0) {
-      setIsCounting(false);
+      timer = setInterval(() => {
+        setCountdown((prev) => {
+          if (prev <= 1) {
+            setIsCounting(false);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
     }
     return () => clearInterval(timer);
   }, [isCounting, countdown]);

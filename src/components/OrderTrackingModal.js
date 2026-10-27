@@ -7,9 +7,16 @@ import {
   ScrollView,
   TouchableOpacity,
   Dimensions,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOWS, RADIUS } from '../theme/theme';
+import {
+  sendOrderMessage,
+  joinOrderRoom,
+  leaveOrderRoom,
+  subscribeNewMessage,
+} from '../services/socket';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -30,6 +37,8 @@ export default function OrderTrackingModal({
   onRequireLogin,
 }) {
   const [selectedOrderId, setSelectedOrderId] = React.useState(null);
+  const [messages, setMessages] = React.useState([]);
+  const [chatInput, setChatInput] = React.useState('');
 
   // Yêu cầu cốt lõi: Chỉ người dùng đã đăng nhập mới xem được, và CHỈ xem đơn của chính mình!
   const myOrders = React.useMemo(() => {
@@ -62,6 +71,37 @@ export default function OrderTrackingModal({
   }, [myOrders, visible]);
 
   const currentOrder = myOrders?.find((o) => o.id === selectedOrderId) || myOrders?.[0];
+
+  // Room subscription & 2-way real-time messaging
+  React.useEffect(() => {
+    if (visible && currentOrder?.id) {
+      joinOrderRoom(currentOrder.id);
+      const unsub = subscribeNewMessage((msg) => {
+        if (msg.orderId === currentOrder.id) {
+          setMessages((prev) => [...prev, msg]);
+        }
+      });
+      return () => {
+        leaveOrderRoom(currentOrder.id);
+        unsub();
+      };
+    }
+  }, [visible, currentOrder?.id]);
+
+  const handleSendMessage = (textToSend = null) => {
+    const text = textToSend || chatInput;
+    if (!text || !text.trim() || !currentOrder) return;
+
+    sendOrderMessage({
+      orderId: currentOrder.id,
+      orderCode: currentOrder.orderCode || currentOrder.order_code,
+      message: text.trim(),
+      senderName: currentUser?.full_name || currentUser?.name || 'Khách hàng',
+      senderRole: 'CUSTOMER',
+    });
+
+    setChatInput('');
+  };
 
   const getStepIndex = (status) => {
     switch (status) {
@@ -360,6 +400,79 @@ export default function OrderTrackingModal({
                       <Text style={styles.summaryTotalValue}>
                         {currentOrder.total_amount?.toLocaleString('vi-VN')}đ
                       </Text>
+                    </View>
+                  </View>
+
+                  {/* 2-WAY REALTIME CHAT & NOTE TO BARISTA (Requirement B.3 & B.4) */}
+                  <View style={styles.chatSection}>
+                    <View style={styles.chatHeader}>
+                      <Ionicons name="chatbubbles-outline" size={16} color={COLORS.primary} />
+                      <Text style={styles.chatTitle}>Nhắn tin trực tiếp với Barista</Text>
+                      <View style={styles.livePill}>
+                        <View style={styles.liveDot} />
+                        <Text style={styles.liveText}>Realtime</Text>
+                      </View>
+                    </View>
+
+                    {/* Messages list */}
+                    {messages.length > 0 && (
+                      <View style={styles.messagesList}>
+                        {messages.map((m) => {
+                          const isMe = m.senderRole === 'CUSTOMER';
+                          return (
+                            <View
+                              key={m.id || Math.random()}
+                              style={[
+                                styles.msgBubble,
+                                isMe ? styles.msgBubbleMe : styles.msgBubbleStaff,
+                              ]}
+                            >
+                              <Text style={styles.msgSender}>{m.senderName} ({isMe ? 'Bạn' : 'Quầy bar'}):</Text>
+                              <Text style={[styles.msgText, isMe && { color: '#FFF' }]}>{m.message}</Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    )}
+
+                    {/* Quick message suggestions */}
+                    <View style={styles.quickChipsRow}>
+                      <TouchableOpacity
+                        style={styles.quickChip}
+                        onPress={() => handleSendMessage('Cho em xin thêm ít đá nhé')}
+                      >
+                        <Text style={styles.quickChipText}>+ Ít đá</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.quickChip}
+                        onPress={() => handleSendMessage('Cho em xin thêm ống hút giấy')}
+                      >
+                        <Text style={styles.quickChipText}>+ Ống hút</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.quickChip}
+                        onPress={() => handleSendMessage('Đến nơi gọi em trước 5 phút nhé')}
+                      >
+                        <Text style={styles.quickChipText}>+ Gọi trước khi tới</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Chat input form */}
+                    <View style={styles.chatInputRow}>
+                      <TextInput
+                        style={styles.chatInput}
+                        placeholder="Ghi chú thêm cho quán..."
+                        placeholderTextColor={COLORS.textMuted}
+                        value={chatInput}
+                        onChangeText={setChatInput}
+                      />
+                      <TouchableOpacity
+                        style={[styles.sendBtn, !chatInput.trim() && { opacity: 0.5 }]}
+                        onPress={() => handleSendMessage()}
+                        disabled={!chatInput.trim()}
+                      >
+                        <Ionicons name="send" size={16} color="#FFF" />
+                      </TouchableOpacity>
                     </View>
                   </View>
 
@@ -828,5 +941,117 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontWeight: '700',
     fontSize: 13,
+  },
+  chatSection: {
+    backgroundColor: COLORS.surface,
+    padding: 16,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    ...SHADOWS.sm,
+  },
+  chatHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+  },
+  chatTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.primaryDark,
+    flex: 1,
+  },
+  livePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: COLORS.success,
+  },
+  liveText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.success,
+  },
+  messagesList: {
+    marginBottom: 12,
+    gap: 6,
+  },
+  msgBubble: {
+    padding: 10,
+    borderRadius: RADIUS.sm,
+    maxWidth: '90%',
+  },
+  msgBubbleMe: {
+    alignSelf: 'flex-end',
+    backgroundColor: COLORS.primary,
+  },
+  msgBubbleStaff: {
+    alignSelf: 'flex-start',
+    backgroundColor: COLORS.surfaceHighlight,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceBorder,
+  },
+  msgSender: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+    marginBottom: 2,
+  },
+  msgText: {
+    fontSize: 13,
+    color: COLORS.text,
+  },
+  quickChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 10,
+  },
+  quickChip: {
+    backgroundColor: COLORS.surfaceHighlight,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceBorder,
+  },
+  quickChipText: {
+    fontSize: 11,
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
+  chatInputRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  chatInput: {
+    flex: 1,
+    backgroundColor: COLORS.surfaceHighlight,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: COLORS.text,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceBorder,
+  },
+  sendBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
