@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOWS, RADIUS, SPACING, TOUCH_TARGET } from '../theme/theme';
+import { subscribeNewMessage } from '../services/socket';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -79,6 +80,16 @@ export default function StaffView({
       setFeedbackToast('');
     }, 2800);
   };
+
+  // Real-time listener for incoming customer messages / notes (Requirement B.3 & B.6)
+  React.useEffect(() => {
+    const unsub = subscribeNewMessage((msg) => {
+      if (msg.senderRole === 'CUSTOMER') {
+        triggerToast(`💬 Khách nhắn (#${msg.orderCode || msg.orderId}): "${msg.message}"`);
+      }
+    });
+    return () => unsub();
+  }, []);
 
   const toggleExpand = (orderId) => {
     setExpandedOrders((prev) => ({

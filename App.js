@@ -10,6 +10,8 @@ import {
   Image,
   Dimensions,
   Platform,
+  AppState,
+  NativeModules,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -35,7 +37,11 @@ import {
   updateOrderStatus as apiUpdateOrderStatus,
   toggleProductAvailability as apiToggleAvailability,
   fetchCustomerAddresses,
+  fetchNotifications,
+  markNotificationAsReadApi,
+  markAllNotificationsAsReadApi,
 } from './src/api/services';
+import { getAuthToken, setAuthToken } from './src/api/client';
 
 import {
   initSocketClient,
@@ -44,7 +50,15 @@ import {
   subscribeOrderPaymentUpdated,
   subscribeStoreStatusUpdated,
   subscribeProductAvailabilityUpdated,
+  subscribeConnectionStatus,
+  subscribeNotification,
 } from './src/services/socket';
+
+import {
+  registerForPushNotificationsAsync,
+  setupNotificationListeners,
+  presentLocalNotification,
+} from './src/services/notifications';
 
 import Header from './src/components/Header';
 import ProductCard from './src/components/ProductCard';
@@ -61,10 +75,12 @@ import OwnerView from './src/components/OwnerView';
 import FloatingBottomNav from './src/components/FloatingBottomNav';
 import SearchModal from './src/components/SearchModal';
 import AccountModal from './src/components/AccountModal';
+import NotificationModal from './src/components/NotificationModal';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function App() {
+  console.log('[App] Rendering App component...');
   // Global & Multi-role state
   const [activeRole, setActiveRole] = useState('CUSTOMER'); // 'CUSTOMER' | 'STAFF' | 'OWNER'
   const [isAcceptingOrders, setIsAcceptingOrders] = useState(
@@ -102,6 +118,9 @@ export default function App() {
   const [isAccountModalVisible, setIsAccountModalVisible] = useState(false);
   const [isAddressModalVisible, setIsAddressModalVisible] = useState(false);
   const [isSearchModalVisible, setIsSearchModalVisible] = useState(false);
+  const [isNotificationModalVisible, setIsNotificationModalVisible] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [socketStatus, setSocketStatus] = useState('CONNECTING');
 
   // Security Guard: Tách biệt hoàn toàn - nếu không có quyền STAFF/OWNER thì chỉ được ở giao diện CUSTOMER
   const guardedRole = useMemo(() => {
@@ -115,6 +134,47 @@ export default function App() {
   }, [activeRole, currentUser]);
 
   const mainScrollRef = useRef(null);
+
+  // ==========================================================
+  // ANDROID NAVIGATION BAR AUTO-HIDE (IMMERSIVE STICKY MODE)
+  // ==========================================================
+  useEffect(() => {
+    let Nav = null;
+
+    async function configureAndroidImmersiveMode() {
+      if (Platform.OS === 'android') {
+        try {
+          const hasNativeNavigationBar = Boolean(
+            globalThis?.expo?.modules?.ExpoNavigationBar ||
+            NativeModules?.ExpoNavigationBar
+          );
+
+          if (hasNativeNavigationBar) {
+            Nav = require('expo-navigation-bar');
+            if (Nav && typeof Nav.setVisibilityAsync === 'function') {
+              await Nav.setVisibilityAsync('hidden');
+              await Nav.setBehaviorAsync('overlay-swipe');
+              await Nav.setBackgroundColorAsync('#00000000');
+              await Nav.setButtonStyleAsync('light');
+            }
+          }
+        } catch (e) {
+          // Gracefully fallback
+        }
+      }
+    }
+    configureAndroidImmersiveMode();
+
+    const appStateSub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && Platform.OS === 'android' && Nav) {
+        Nav.setVisibilityAsync?.('hidden').catch?.(() => {});
+      }
+    });
+
+    return () => {
+      appStateSub.remove();
+    };
+  }, []);
 
   // ==========================================================
   // REAL-TIME WEBSOCKET & BACKEND API DATA SYNCHRONIZATION
@@ -133,6 +193,17 @@ export default function App() {
         if (exists) return prev;
         return [newOrder, ...prev];
       });
+
+      // Nếu nhân viên hoặc chủ quán đang trực, hiện thông báo hệ thống có đơn mới
+      const code = newOrder.order_code || newOrder.orderCode || `#${newOrder.id}`;
+      if (activeRole === 'STAFF' || activeRole === 'OWNER') {
+        presentLocalNotification({
+          title: '🔔 Có đơn hàng mới!',
+          body: `Đơn ${code} của khách ${newOrder.customer_name || 'Khách vãng lai'} (${(newOrder.items || []).length} món).`,
+          data: { screen: 'ORDER_DETAIL', orderId: newOrder.id, orderCode: code },
+          channelId: 'antcafe_orders_v2',
+        });
+      }
     });
 
     // Subscribe to order status updates (e.g. Barista confirmed or order ready)
@@ -144,6 +215,59 @@ export default function App() {
             : o
         )
       );
+
+      // Kích hoạt thông báo tức thì trên thanh thông báo hệ điều hành
+      const code = updated.order_code || updated.orderCode || `#${updated.id}`;
+      const status = updated.status;
+
+      let notifTitle = null;
+      let notifBody = null;
+
+      if (status === 'READY') {
+        notifTitle = '🎉 Mời bạn nhận món tại quầy!';
+        notifBody = `Đơn hàng ${code} đã pha chế xong và sẵn sàng. Chúc bạn thưởng thức cà phê thật ngon miệng! ☕`;
+      } else if (status === 'COMPLETED') {
+        notifTitle = '✨ Đơn hàng đã hoàn tất!';
+        notifBody = `Cảm ơn bạn đã lựa chọn Ant Coffee! Đơn hàng ${code} đã hoàn thành. Hẹn gặp lại bạn lần sau! ❤️`;
+      } else if (status === 'CONFIRMED') {
+        notifTitle = '☕ Quán đã nhận đơn & đang pha chế';
+        notifBody = `Barista Ant Coffee đang chuẩn bị các món nước thơm ngon cho đơn ${code}.`;
+      } else if (status === 'CANCELLED') {
+        notifTitle = '⚠️ Đơn hàng đã bị hủy';
+        notifBody = `Đơn hàng ${code} đã được hủy.${updated.cancel_reason ? ' Lý do: ' + updated.cancel_reason : ''}`;
+      }
+
+      if (notifTitle && notifBody) {
+        // Chỉ lưu và hiển thị thông báo nếu người dùng đã đăng nhập
+        if (currentUser) {
+          const orderCustId = updated.customer_id || updated.customerId;
+          const isMyOrder = currentUser.role !== 'CUSTOMER' || (orderCustId && String(orderCustId) === String(currentUser.id));
+          if (isMyOrder) {
+            presentLocalNotification({
+              title: notifTitle,
+              body: notifBody,
+              data: {
+                screen: 'ORDER_DETAIL',
+                orderId: updated.id,
+                orderCode: code,
+                status: updated.status,
+              },
+              channelId: 'antcafe_orders_v2',
+            });
+
+            const newNotifItem = {
+              id: Date.now(),
+              title: notifTitle,
+              body: notifBody,
+              data: { orderId: updated.id, orderCode: code, screen: 'ORDER_DETAIL' },
+              type: 'ORDER_STATUS',
+              is_read: false,
+              created_at: new Date().toISOString(),
+            };
+            setNotifications((prev) => [newNotifItem, ...prev]);
+          }
+        }
+      }
     });
 
     // Subscribe to real-time payment status updates (e.g. MoMo payment confirmed via IPN)
@@ -186,7 +310,78 @@ export default function App() {
       );
     });
 
-    // 2. Fetch Initial Dynamic Data from SQL Server Backend
+    // 2. Push Notification registration & Handshake
+    registerForPushNotificationsAsync(currentUser);
+
+    // Setup Notification Listeners (Foreground, Background, Killed states)
+    const unsubPush = setupNotificationListeners({
+      onNotificationReceived: (notification) => {
+        const content = notification.request?.content || {};
+        const newNotifItem = {
+          id: Date.now(),
+          title: content.title || 'Thông báo mới',
+          body: content.body || '',
+          data: content.data || {},
+          type: content.data?.type || 'ORDER_STATUS',
+          is_read: false,
+          created_at: new Date().toISOString(),
+        };
+        setNotifications((prev) => [newNotifItem, ...prev]);
+      },
+      onNotificationResponse: (data) => {
+        // Requirement A.4: Nhấn vào thông báo điều hướng đúng màn hình
+        if (data?.screen === 'ORDER_DETAIL' || data?.orderId || data?.orderCode) {
+          setIsOrderTrackingVisible(true);
+        } else if (data?.screen === 'MENU') {
+          setCustomerTab('MENU');
+        } else if (data?.screen === 'NOTIFICATIONS') {
+          setIsNotificationModalVisible(true);
+        }
+      },
+    });
+
+    // Subscribe to Socket Connection Status (Connected / Reconnecting / Disconnected)
+    const unsubConn = subscribeConnectionStatus((status) => {
+      setSocketStatus(status);
+    });
+
+    // Subscribe to real-time server push notification dispatch
+    const unsubNotifSocket = subscribeNotification((newNotif) => {
+      // Chỉ nhận thông báo nếu đã đăng nhập và thông báo thuộc về user này
+      if (!currentUser) return;
+      if (newNotif.userId && currentUser.id && Number(newNotif.userId) !== Number(currentUser.id) && currentUser.role === 'CUSTOMER') {
+        return;
+      }
+
+      setNotifications((prev) => {
+        const exists = prev.some((n) => n.id === newNotif.id);
+        if (exists) return prev;
+        return [newNotif, ...prev];
+      });
+
+      // Kích hoạt thông báo tức thì trên OS cho mọi thông báo mới nhận qua Socket
+      if (newNotif?.title) {
+        presentLocalNotification({
+          title: newNotif.title,
+          body: newNotif.body || '',
+          data: newNotif.data || { screen: 'NOTIFICATIONS' },
+          channelId: newNotif.type === 'ORDER_STATUS' ? 'antcafe_orders_v2' : 'antcafe_reminders_v2',
+        });
+      }
+    });
+
+    // Fetch initial notifications: CHỈ fetch khi ĐÃ ĐĂNG NHẬP! Nếu chưa đăng nhập thì làm trống notifications
+    if (currentUser?.id) {
+      fetchNotifications(currentUser.id).then((notifs) => {
+        if (Array.isArray(notifs)) {
+          setNotifications(notifs);
+        }
+      });
+    } else {
+      setNotifications([]);
+    }
+
+    // 3. Fetch Initial Dynamic Data from SQL Server Backend
     fetchStoreStatus().then((store) => {
       if (store) {
         setStoreSettings(store);
@@ -224,8 +419,11 @@ export default function App() {
       unsubPaymentUpdated();
       unsubStore();
       unsubProduct();
+      unsubConn();
+      unsubNotifSocket();
+      if (unsubPush) unsubPush();
     };
-  }, []);
+  }, [currentUser]);
 
   // Cart Deduplication & Aggregation Helper
   const isSameCartItem = (itemA, itemB) => {
@@ -602,6 +800,15 @@ export default function App() {
     setCurrentUser(user);
     setActiveRole(role);
 
+    // Requirement A.2: Token push được lưu theo tài khoản khi đăng nhập
+    registerForPushNotificationsAsync(user);
+
+    // Requirement B: Handshake WebSocket bằng token JWT của tài khoản đăng nhập
+    const token = getAuthToken();
+    if (token) {
+      initSocketClient(token);
+    }
+
     if (role === 'CUSTOMER') {
       // Nếu trước đó khách đã chọn món đồ uống trước khi đăng nhập thì tự động thêm vào giỏ
       if (pendingItemToAdd) {
@@ -611,6 +818,11 @@ export default function App() {
       fetchCustomerAddresses().then((addrs) => {
         if (addrs && addrs.length > 0) {
           setSelectedAddress(addrs[0]);
+        }
+      });
+      fetchNotifications(user?.id).then((notifs) => {
+        if (Array.isArray(notifs) && notifs.length > 0) {
+          setNotifications(notifs);
         }
       });
     } else if (role === 'STAFF') {
@@ -624,12 +836,16 @@ export default function App() {
 
   // Đăng xuất và đưa giao diện về chế độ Khách vãng lai (Guest) an toàn
   const handleLogout = () => {
+    setAuthToken(null);
     setCurrentUser(null);
     setActiveRole('CUSTOMER');
     setCart([]);
+    setNotifications([]); // Xóa sạch dữ liệu thông báo khi đăng xuất
     setPendingItemToAdd(null);
     setCustomerTab('HOME');
     setIsAccountModalVisible(false);
+    // Reset socket về guest mode
+    initSocketClient(null);
   };
 
   // Quản lý trạng thái Bật / Tạm ngưng nhận đơn toàn hệ thống (Dành cho Chủ quán)
@@ -761,6 +977,9 @@ export default function App() {
           onOpenLogin={() => setIsLoginModalVisible(true)}
           onOpenAccount={() => setIsAccountModalVisible(true)}
           onLogout={handleLogout}
+          socketStatus={socketStatus}
+          unreadNotificationCount={currentUser ? notifications.filter((n) => !n.is_read).length : 0}
+          onOpenNotifications={() => setIsNotificationModalVisible(true)}
         />
 
         {/* VIEW 1: CUSTOMER VIEW */}
@@ -1259,6 +1478,37 @@ export default function App() {
           onClose={() => setIsSearchModalVisible(false)}
           products={products}
           onSelectProduct={handleOpenDetail}
+        />
+
+        {/* Notification Center Modal (Requirement A.6) */}
+        <NotificationModal
+          visible={isNotificationModalVisible}
+          notifications={currentUser ? notifications : []}
+          currentUser={currentUser}
+          onOpenLogin={() => {
+            setIsNotificationModalVisible(false);
+            setIsLoginModalVisible(true);
+          }}
+          onClose={() => setIsNotificationModalVisible(false)}
+          onMarkAsRead={async (id) => {
+            setNotifications((prev) =>
+              prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
+            );
+            await markNotificationAsReadApi(id);
+          }}
+          onMarkAllAsRead={async () => {
+            setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+            await markAllNotificationsAsReadApi(currentUser?.id);
+          }}
+          onSelectNotificationAction={(notif) => {
+            setIsNotificationModalVisible(false);
+            const data = notif.data || {};
+            if (data.screen === 'ORDER_DETAIL' || data.orderId || data.orderCode) {
+              setIsOrderTrackingVisible(true);
+            } else if (data.screen === 'MENU') {
+              setCustomerTab('MENU');
+            }
+          }}
         />
       </SafeAreaView>
     </SafeAreaProvider>

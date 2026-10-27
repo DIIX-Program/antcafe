@@ -114,6 +114,12 @@ export const TYPOGRAPHY = {
   ticketSeq: { fontSize: 24, fontWeight: '900', letterSpacing: 0.5, color: '#581C87', fontVariant: ['tabular-nums'] },
 };
 
-export const MOTION = {
-  durations: { press: 140, stateChange: 200, modal: 280, bottomSheet: 320, success: 450 },
+export default {
+  COLORS,
+  GLASS,
+  SHADOWS,
+  RADIUS,
+  SPACING,
+  TYPOGRAPHY,
+  TOUCH_TARGET,
 };

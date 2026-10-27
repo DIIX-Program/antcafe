@@ -19,6 +19,7 @@ import orderRoutes from './src/routes/orderRoutes.js';
 import staffRoutes from './src/routes/staffRoutes.js';
 import adminRoutes from './src/routes/adminRoutes.js';
 import paymentRoutes from './src/routes/paymentRoutes.js';
+import notificationRoutes from './src/routes/notificationRoutes.js';
 
 dotenv.config();
 
@@ -85,6 +86,7 @@ app.use('/api/v1/orders', orderRoutes);
 app.use('/api/v1/staff', staffRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/payment', paymentRoutes);
+app.use('/api/v1/notifications', notificationRoutes);
 
 // 404 Handler
 app.use((req, res) => {

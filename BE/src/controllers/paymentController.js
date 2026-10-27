@@ -5,6 +5,7 @@ import {
   queryMoMoPaymentStatus 
 } from '../services/momoService.js';
 import { emitOrderPaymentUpdated, emitOrderStatusUpdated } from '../socket/socketHandler.js';
+import { notifyOrderPaymentUpdated } from '../services/notificationService.js';
 
 /**
  * 1. Khởi tạo thanh toán MoMo cho đơn hàng
@@ -135,6 +136,9 @@ export async function handleMoMoIPN(req, res) {
         // 3. Phát sự kiện WebSocket theo thời gian thực
         emitOrderPaymentUpdated(updatedOrder);
         emitOrderStatusUpdated(updatedOrder);
+        notifyOrderPaymentUpdated(updatedOrder).catch(err => {
+          console.warn('[Push Notification] notifyOrderPaymentUpdated background error:', err.message);
+        });
       } else {
         console.warn(`[PaymentController] Order #${orderCode} not found in database to update.`);
       }
@@ -392,6 +396,9 @@ export async function simulateVietQRPayment(req, res) {
     // Phát WebSocket thông báo tức thì cho Client & Quán
     emitOrderPaymentUpdated(updatedOrder);
     emitOrderStatusUpdated(updatedOrder);
+    notifyOrderPaymentUpdated(updatedOrder).catch(err => {
+      console.warn('[Push Notification] notifyOrderPaymentUpdated background error:', err.message);
+    });
 
     return res.status(200).json({
       success: true,

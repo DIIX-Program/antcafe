@@ -392,13 +392,63 @@ export async function simulateVietQRPayment(orderCode) {
   }
 }
 
-export async function switchOrderPaymentMethod(orderCode, paymentMethod) {
+// ==========================================
+// 11. NOTIFICATION APIS
+// ==========================================
+export async function registerPushTokenApi({ pushToken, userId, deviceName, platform }) {
   try {
-    const res = await http.post('/api/v1/payment/switch-method', { orderCode, paymentMethod });
+    const res = await http.post('/api/v1/notifications/push-token', {
+      push_token: pushToken,
+      userId,
+      device_name: deviceName,
+      platform,
+    });
     return res.data;
   } catch (error) {
-    console.warn('[API Payment] switchOrderPaymentMethod failed:', error.message);
-    throw error;
+    console.warn('[API Notifications] registerPushTokenApi error:', error.message);
+    return null;
+  }
+}
+
+export async function fetchNotifications(userId) {
+  try {
+    const res = await http.get('/api/v1/notifications', {
+      params: userId ? { userId } : {},
+    });
+    return res.data || [];
+  } catch (error) {
+    console.warn('[API Notifications] fetchNotifications fallback:', error.message);
+    return [];
+  }
+}
+
+export async function markNotificationAsReadApi(id) {
+  try {
+    const res = await http.patch(`/api/v1/notifications/${id}/read`);
+    return res.data;
+  } catch (error) {
+    console.warn('[API Notifications] markNotificationAsReadApi error:', error.message);
+    return null;
+  }
+}
+
+export async function markAllNotificationsAsReadApi(userId) {
+  try {
+    const res = await http.patch('/api/v1/notifications/read-all', { userId });
+    return res.data;
+  } catch (error) {
+    console.warn('[API Notifications] markAllNotificationsAsReadApi error:', error.message);
+    return null;
+  }
+}
+
+export async function sendTestNotificationApi(payload) {
+  try {
+    const res = await http.post('/api/v1/notifications/send', payload);
+    return res.data;
+  } catch (error) {
+    console.warn('[API Notifications] sendTestNotificationApi error:', error.message);
+    return null;
   }
 }
 

@@ -20,7 +20,12 @@ router.get('/', getAllOrders);
 
 // Order status updates
 router.put('/:id/status', optionalAuth, updateOrderStatus);
+router.patch('/:id/status', optionalAuth, updateOrderStatus);
 router.put('/:id/cancel', optionalAuth, (req, res, next) => {
+  req.body.status = 'CANCELLED';
+  updateOrderStatus(req, res, next);
+});
+router.patch('/:id/cancel', optionalAuth, (req, res, next) => {
   req.body.status = 'CANCELLED';
   updateOrderStatus(req, res, next);
 });
