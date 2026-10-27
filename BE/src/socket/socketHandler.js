@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
+import { saveOrderMessage, getOrderMessages } from '../services/chatService.js';
 dotenv.config();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'ant_coffee_super_secret_jwt_key_2026_xyz987';
@@ -94,29 +95,75 @@ export function initSocketIO(io) {
     // =========================================================================
 
     // Event 1: Client sends quick message/note for order (2-way chat/support)
-    socket.on('order:send_message', (payload) => {
+    socket.on('order:send_message', async (payload) => {
       const { orderId, orderCode, message, senderName, senderRole } = payload || {};
       console.log(`[Socket.IO] 2-Way Message for order #${orderCode}: "${message}" from ${senderName} (${senderRole})`);
 
-      const messagePacket = {
-        id: Date.now(),
-        orderId,
-        orderCode,
-        message,
-        senderName: senderName || (socket.user?.full_name || 'Khách hàng'),
-        senderRole: senderRole || (socket.user?.role || 'CUSTOMER'),
-        timestamp: new Date().toISOString(),
-      };
+      try {
+        const savedMsg = await saveOrderMessage({
+          orderId,
+          orderCode,
+          senderName: senderName || (socket.user?.full_name || 'Khách hàng'),
+          senderRole: senderRole || (socket.user?.role || 'CUSTOMER'),
+          message,
+        });
 
-      // Broadcast to both customer room and staff room
-      if (orderId) {
-        io.to(`order_${orderId}`).emit('order:new_message', messagePacket);
+        const messagePacket = {
+          id: savedMsg.id,
+          orderId: Number(savedMsg.orderId),
+          orderCode: savedMsg.orderCode,
+          message: savedMsg.message,
+          senderName: savedMsg.senderName,
+          senderRole: savedMsg.senderRole,
+          timestamp: savedMsg.timestamp,
+        };
+
+        // Broadcast to customer room and staff room EXACTLY ONCE using Socket.IO chaining
+        if (orderId) {
+          io.to(`order_${orderId}`).to('room:orders').emit('order:new_message', messagePacket);
+        } else {
+          io.to('room:orders').emit('order:new_message', messagePacket);
+        }
+
+        // Acknowledge back to sender
+        socket.emit('order:message_sent_ack', { success: true, messagePacket });
+      } catch (err) {
+        console.error('[Socket.IO] Error saving order message:', err.message);
+        // Fallback in-memory packet if DB error occurs
+        const fallbackPacket = {
+          id: Date.now(),
+          orderId,
+          orderCode,
+          message,
+          senderName: senderName || 'Khách hàng',
+          senderRole: senderRole || 'CUSTOMER',
+          timestamp: new Date().toISOString(),
+        };
+        if (orderId) {
+          io.to(`order_${orderId}`).to('room:orders').emit('order:new_message', fallbackPacket);
+        } else {
+          io.to('room:orders').emit('order:new_message', fallbackPacket);
+        }
+        socket.emit('order:message_sent_ack', { success: false, error: err.message, messagePacket: fallbackPacket });
       }
-      io.to('room:orders').emit('order:new_message', messagePacket);
-      io.emit('order:new_message', messagePacket); // Global fallback
+    });
 
-      // Acknowledge back to sender
-      socket.emit('order:message_sent_ack', { success: true, messagePacket });
+    // Event 1.1: Fetch chat message history for order
+    socket.on('order:get_messages', async (data, callback) => {
+      const { orderId } = data || {};
+      try {
+        const messages = await getOrderMessages(orderId);
+        if (typeof callback === 'function') {
+          callback({ success: true, data: messages });
+        } else {
+          socket.emit('order:messages_history', { orderId, messages });
+        }
+      } catch (err) {
+        console.error('[Socket.IO] Error getting order messages:', err.message);
+        if (typeof callback === 'function') {
+          callback({ success: false, data: [], error: err.message });
+        }
+      }
     });
 
     // Event 2: Staff updates order status via socket directly (2-way)
@@ -215,5 +262,17 @@ export function emitOrderPaymentUpdated(order) {
       ioInstance.to(`order_${order.id}`).emit('order:payment_updated', order);
     }
     ioInstance.emit('order:payment_updated', order);
+  }
+}
+
+// Broadcast new order message without duplicates
+export function emitOrderMessage(messagePacket) {
+  if (ioInstance && messagePacket) {
+    const { orderId } = messagePacket;
+    if (orderId) {
+      ioInstance.to(`order_${orderId}`).to('room:orders').emit('order:new_message', messagePacket);
+    } else {
+      ioInstance.to('room:orders').emit('order:new_message', messagePacket);
+    }
   }
 }

@@ -452,3 +452,31 @@ export async function sendTestNotificationApi(payload) {
   }
 }
 
+export async function fetchOrderMessagesApi(orderId) {
+  if (!orderId) return [];
+  try {
+    const res = await http.get(`/api/v1/orders/${orderId}/messages`);
+    return res.data?.data || [];
+  } catch (error) {
+    console.warn('[API Chat] fetchOrderMessagesApi error:', error.message);
+    return [];
+  }
+}
+
+export async function sendOrderMessageApi(orderId, { orderCode, message, senderName, senderRole }) {
+  if (!orderId || !message) return null;
+  try {
+    const res = await http.post(`/api/v1/orders/${orderId}/messages`, {
+      orderCode,
+      message,
+      senderName,
+      senderRole,
+    });
+    return res.data?.data;
+  } catch (error) {
+    console.warn('[API Chat] sendOrderMessageApi error:', error.message);
+    return null;
+  }
+}
+
+

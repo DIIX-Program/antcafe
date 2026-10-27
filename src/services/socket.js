@@ -196,6 +196,16 @@ export function sendOrderMessage({ orderId, orderCode, message, senderName, send
   return false;
 }
 
+export function getOrderMessagesViaSocket(orderId, callback) {
+  if (socket && socket.connected && orderId) {
+    socket.emit('order:get_messages', { orderId }, (res) => {
+      if (res && res.success && Array.isArray(res.data) && typeof callback === 'function') {
+        callback(res.data);
+      }
+    });
+  }
+}
+
 export function updateOrderStatusViaSocket({ orderId, orderCode, status, customerId }) {
   if (socket && socket.connected) {
     socket.emit('order:update_status_socket', {
@@ -271,6 +281,7 @@ export default {
   leaveOrderRoom,
   joinCustomerRoom,
   sendOrderMessage,
+  getOrderMessagesViaSocket,
   updateOrderStatusViaSocket,
   subscribeOrderCreated,
   subscribeOrderStatusUpdated,

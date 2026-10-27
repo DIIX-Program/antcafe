@@ -16,7 +16,9 @@ import {
   joinOrderRoom,
   leaveOrderRoom,
   subscribeNewMessage,
+  getOrderMessagesViaSocket,
 } from '../services/socket';
+import { fetchOrderMessagesApi, sendOrderMessageApi } from '../api/services';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -72,19 +74,48 @@ export default function OrderTrackingModal({
 
   const currentOrder = myOrders?.find((o) => o.id === selectedOrderId) || myOrders?.[0];
 
-  // Room subscription & 2-way real-time messaging
+  // Room subscription & 2-way real-time messaging with strict deduplication
   React.useEffect(() => {
     if (visible && currentOrder?.id) {
-      joinOrderRoom(currentOrder.id);
-      const unsub = subscribeNewMessage((msg) => {
-        if (msg.orderId === currentOrder.id) {
-          setMessages((prev) => [...prev, msg]);
+      const orderId = currentOrder.id;
+      setMessages([]);
+      joinOrderRoom(orderId);
+
+      // Load initial message history for this order
+      fetchOrderMessagesApi(orderId).then((history) => {
+        if (history && history.length > 0) {
+          setMessages(history);
+        } else {
+          getOrderMessagesViaSocket(orderId, (socketHistory) => {
+            if (socketHistory && socketHistory.length > 0) {
+              setMessages(socketHistory);
+            }
+          });
         }
       });
+
+      const unsub = subscribeNewMessage((msg) => {
+        if (Number(msg.orderId) === Number(orderId)) {
+          setMessages((prev) => {
+            // STRICT DE-DUPLICATION: check id, or (content + role + close timestamp)
+            const exists = prev.some((m) => 
+              (m.id && msg.id && String(m.id) === String(msg.id)) ||
+              (m.message === msg.message && 
+               m.senderRole === msg.senderRole && 
+               Math.abs(new Date(m.timestamp || 0) - new Date(msg.timestamp || 0)) < 4000)
+            );
+            if (exists) return prev;
+            return [...prev, msg];
+          });
+        }
+      });
+
       return () => {
-        leaveOrderRoom(currentOrder.id);
+        leaveOrderRoom(orderId);
         unsub();
       };
+    } else {
+      setMessages([]);
     }
   }, [visible, currentOrder?.id]);
 
@@ -92,13 +123,30 @@ export default function OrderTrackingModal({
     const text = textToSend || chatInput;
     if (!text || !text.trim() || !currentOrder) return;
 
-    sendOrderMessage({
+    const payload = {
       orderId: currentOrder.id,
       orderCode: currentOrder.orderCode || currentOrder.order_code,
       message: text.trim(),
       senderName: currentUser?.full_name || currentUser?.name || 'Khách hàng',
       senderRole: 'CUSTOMER',
-    });
+    };
+
+    const sent = sendOrderMessage(payload);
+    if (!sent) {
+      sendOrderMessageApi(currentOrder.id, payload).then((res) => {
+        if (res && res.data) {
+          const msg = res.data;
+          setMessages((prev) => {
+            const exists = prev.some((m) =>
+              (m.id && msg.id && String(m.id) === String(msg.id)) ||
+              (m.message === msg.message && m.senderRole === msg.senderRole)
+            );
+            if (exists) return prev;
+            return [...prev, msg];
+          });
+        }
+      });
+    }
 
     setChatInput('');
   };
