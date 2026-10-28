@@ -210,7 +210,7 @@ export default function Header({
           />
           <View style={styles.brandTextWrap}>
             <View style={styles.brandTitleRow}>
-              <Text style={styles.brandName}>ANT COFFEE</Text>
+              <Text style={styles.brandName} numberOfLines={1}>ANT COFFEE</Text>
               {/* Responsive Micro Live Beacon (Gọn gàng, tinh tế, không chiếm chỗ) */}
               <TouchableOpacity
                 style={[
@@ -369,19 +369,19 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   logo: {
-    width: 38,
-    height: 38,
-    marginRight: 10,
+    width: 33,
+    height: 33,
+    marginRight: 8,
   },
   logoCompact: {
-    width: 32,
-    height: 32,
+    width: 30,
+    height: 30,
     marginRight: 6,
   },
   brandName: {
-    fontSize: 16,
+    fontSize: 13.5,
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
     color: COLORS.primaryDark,
   },
   statusPill: {
@@ -435,7 +435,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: COLORS.borderLight,
     ...SHADOWS.sm,
   },
   notifBtn: {
@@ -446,7 +446,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: COLORS.borderLight,
     ...SHADOWS.sm,
   },
   notifIconWrap: {

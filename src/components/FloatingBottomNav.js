@@ -104,15 +104,19 @@ export default function FloatingBottomNav({
             return (
               <TouchableOpacity
                 key={tab.key}
-                style={[styles.tabItem, isActive && styles.tabItemActive]}
+                style={[
+                  styles.tabItem,
+                  isActive && styles.tabItemActive,
+                  Platform.OS === 'web' && styles.tabItemWeb,
+                ]}
                 onPress={() => onSelectTab(tab.key)}
                 activeOpacity={0.7}
                 accessibilityLabel={tab.label}
               >
-                <View style={styles.iconWrap}>
+                <View style={[styles.iconWrap, isActive && styles.iconWrapActive]}>
                   <Ionicons
                     name={isActive ? tab.activeIcon : tab.icon}
-                    size={22}
+                    size={21}
                     color={isActive ? COLORS.primary : COLORS.textSecondary}
                   />
                   {tab.badge > 0 && (
@@ -137,12 +141,16 @@ export default function FloatingBottomNav({
         {/* Central Circular Primary Action Button (Elevated) */}
         <View style={styles.centerButtonWrapper}>
           <TouchableOpacity
-            style={[styles.centralButton, { backgroundColor: config.center.bgColor }]}
+            style={[
+              styles.centralButton,
+              { backgroundColor: config.center.bgColor },
+              Platform.OS === 'web' && styles.centralButtonWeb,
+            ]}
             onPress={onCentralAction}
             activeOpacity={0.85}
             accessibilityLabel={config.center.label}
           >
-            <Ionicons name={config.center.icon} size={24} color="#FFF" />
+            <Ionicons name={config.center.icon} size={25} color="#FFF" />
             {config.center.badge !== null && config.center.badge !== undefined && config.center.badge !== 0 && (
               <View style={styles.centralBadge}>
                 <Text style={styles.centralBadgeText}>{config.center.badge}</Text>
@@ -158,15 +166,19 @@ export default function FloatingBottomNav({
             return (
               <TouchableOpacity
                 key={tab.key}
-                style={[styles.tabItem, isActive && styles.tabItemActive]}
+                style={[
+                  styles.tabItem,
+                  isActive && styles.tabItemActive,
+                  Platform.OS === 'web' && styles.tabItemWeb,
+                ]}
                 onPress={() => onSelectTab(tab.key)}
                 activeOpacity={0.7}
                 accessibilityLabel={tab.label}
               >
-                <View style={styles.iconWrap}>
+                <View style={[styles.iconWrap, isActive && styles.iconWrapActive]}>
                   <Ionicons
                     name={isActive ? tab.activeIcon : tab.icon}
-                    size={22}
+                    size={21}
                     color={isActive ? COLORS.primary : COLORS.textSecondary}
                   />
                   {tab.badge > 0 && (
@@ -195,7 +207,7 @@ export default function FloatingBottomNav({
 const styles = StyleSheet.create({
   outerContainer: {
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 22 : 14,
+    bottom: Platform.OS === 'ios' ? 24 : 16,
     left: 0,
     right: 0,
     alignItems: 'center',
@@ -204,19 +216,18 @@ const styles = StyleSheet.create({
   pillContainer: {
     width: '92%',
     maxWidth: 440,
-    height: 64,
+    height: 66,
     backgroundColor: GLASS.navBg,
     borderRadius: RADIUS.full,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     borderWidth: 1,
     borderColor: GLASS.navBorder,
     ...SHADOWS.floatingNav,
-    // Top specular highlight line
     borderTopColor: GLASS.borderLight,
-    borderTopWidth: 1,
+    borderTopWidth: 1.5,
   },
   tabsHalf: {
     flex: 2,
@@ -229,15 +240,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minWidth: 54,
     minHeight: TOUCH_TARGET.minHeight,
-    paddingVertical: 4,
+    paddingVertical: 5,
+    paddingHorizontal: 6,
+    borderRadius: RADIUS.md,
   },
-  tabItemActive: {},
+  tabItemWeb: {
+    transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+    cursor: 'pointer',
+  },
+  tabItemActive: {
+    backgroundColor: 'rgba(254, 243, 199, 0.55)',
+  },
   iconWrap: {
     position: 'relative',
     marginBottom: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconWrapActive: {
+    transform: [{ scale: 1.05 }],
   },
   tabLabel: {
-    fontSize: 10,
+    fontSize: 10.5,
     fontWeight: '600',
     color: COLORS.textSecondary,
     marginTop: 1,
@@ -280,6 +304,10 @@ const styles = StyleSheet.create({
     borderWidth: 3.5,
     borderColor: '#FFFFFF',
     ...SHADOWS.glowOrange,
+  },
+  centralButtonWeb: {
+    cursor: 'pointer',
+    transition: 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
   },
   centralBadge: {
     position: 'absolute',
